@@ -68,23 +68,16 @@ def fetch_token(code):
         raise Exception(f"Request failed: {str(e)}")
 
 def save_token(token):
-    with db.conn.cursor() as cursor:
-        cursor.execute("""
-            INSERT INTO shopee_tokens (access_token, refresh_token, expires_at)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (id) DO UPDATE
-            SET access_token = EXCLUDED.access_token,
-                refresh_token = EXCLUDED.refresh_token,
-                expires_at = EXCLUDED.expires_at
-        """, (token["access_token"], token.get("refresh_token"), token.get("expires_at")))
-        db.conn.commit()
+    with open("shopee_token.json", "w") as f:
+        json.dump(token, f)
 
 def load_token():
-    with db.conn.cursor() as cursor:
-        cursor.execute("SELECT access_token FROM shopee_tokens ORDER BY id DESC LIMIT 1")
-        result = cursor.fetchone()
-        if result:
-            return {"access_token": result["access_token"]}
+    try:
+        if os.path.exists("shopee_token.json"):
+            with open("shopee_token.json", "r") as f:
+                return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return None
     return None
 
 def clear_token():
@@ -101,12 +94,8 @@ def main():
     
     # Handle authentication flow
     if st.session_state.authentication_state != "complete":
-        token = load_token()
-        if token:
-            st.session_state.authentication_state = "complete"
-        else:
-            auth_url = get_auth_url()
-            st.markdown(f"[Authenticate with Shopee]({auth_url})")
+        auth_url = get_auth_url()
+        st.markdown(f"[Authenticate with Shopee]({auth_url})")
         
         # Check for authentication code
         params = st.query_params
