@@ -166,7 +166,7 @@ def batch_upsert_order_tracking(self, records):
         self.close()
 
 def get_order_tracking(self):
-"""Fetch all order tracking records from the database"""
+    """Fetch all order tracking records from the database"""
     try:
         self.connect()
         self.cursor.execute("""
