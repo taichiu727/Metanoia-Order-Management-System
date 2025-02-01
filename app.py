@@ -552,6 +552,13 @@ def check_token_validity(db):
     
     return token
 
+def update_orders_df(original_df, edited_df):
+    """Update the main orders DataFrame with edited changes"""
+    update_cols = ["Received", "Missing", "Note"]
+    return original_df.set_index(['Order Number', 'Product']).combine_first(
+        edited_df.set_index(['Order Number', 'Product'])[update_cols]
+    ).reset_index()
+
 def main():
     st.set_page_config(page_title="Shopee Order Management", layout="wide")
     
@@ -669,13 +676,20 @@ def main():
             key="orders_editor",
             num_rows="fixed",
             height=600,
-            on_change=lambda: setattr(st.session_state, 'pending_changes', True)
+            on_change=lambda: setattr(st.session_state, 'pending_changes', True),
+            debounce=True  # Add debounce to reduce rapid reruns
         )
 
         # Handle changes automatically when detected
         if st.session_state.pending_changes:
             if handle_data_editor_changes(edited_df, db):
                 st.session_state.pending_changes = False
+                # Update filtered_df after changes
+                st.session_state.filtered_df = edited_df.copy()
+                st.session_state.orders_df = update_orders_df(
+                    st.session_state.orders_df,
+                    edited_df
+                )
 
         # Statistics and Metrics
         if st.session_state.get('show_stats', False):
