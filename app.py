@@ -6,7 +6,6 @@ from shopee_oauth import (
     fetch_token, 
     save_token, 
     load_token,
-    is_admin,
     CLIENT_ID,
     CLIENT_SECRET,
     SHOP_ID,
@@ -21,32 +20,6 @@ from psycopg2.extras import RealDictCursor
 
 # Database Configuration
 DATABASE_URL = "postgresql://neondb_owner:npg_r9iSFwQd4zAT@ep-white-sky-a1mrgmyd-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require"
-
-def handle_authentication():
-    """Handle the Shopee authentication flow"""
-    # Only allow admin to authenticate
-    if not is_admin():
-        return False
-
-    if st.session_state.authentication_state != "complete":
-        st.info("Please authenticate with your Shopee account to continue.")
-        auth_url = get_auth_url()
-        st.markdown(f"[🔐 Authenticate with Shopee]({auth_url})")
-        
-        if "code" in st.query_params:
-            with st.spinner("Authenticating..."):
-                try:
-                    code = st.query_params["code"]
-                    token = fetch_token(code)
-                    save_token(token)
-                    st.session_state.authentication_state = "complete"
-                    st.query_params.clear()
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Authentication failed: {str(e)}")
-                    clear_token()
-        return False
-    return True
 
 class OrderDatabase:
     def __init__(self):
@@ -81,6 +54,77 @@ class OrderDatabase:
                     PRIMARY KEY (order_sn, product_name)
                 )
             """)
+
+
+            # New shopee_token table
+            self.cursor.execute("""
+                CREATE TABLE IF NOT EXISTS shopee_token (
+                    id SERIAL PRIMARY KEY,
+                    access_token TEXT NOT NULL,
+                    refresh_token TEXT NOT NULL,
+                    expire_in INTEGER NOT NULL,
+                    fetch_time BIGINT NOT NULL,
+                    shop_id BIGINT NOT NULL,
+                    merchant_id BIGINT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            self.conn.commit()
+        finally:
+            self.close()
+    
+    def save_token(self, token_data):
+        try:
+            self.connect()
+            self.cursor.execute("""
+                INSERT INTO shopee_token (
+                    access_token, refresh_token, expire_in, fetch_time, 
+                    shop_id, merchant_id, updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT (id) DO UPDATE SET
+                    access_token = EXCLUDED.access_token,
+                    refresh_token = EXCLUDED.refresh_token,
+                    expire_in = EXCLUDED.expire_in,
+                    fetch_time = EXCLUDED.fetch_time,
+                    shop_id = EXCLUDED.shop_id,
+                    merchant_id = EXCLUDED.merchant_id,
+                    updated_at = CURRENT_TIMESTAMP
+                RETURNING id
+            """, (
+                token_data["access_token"],
+                token_data["refresh_token"],
+                token_data["expire_in"],
+                token_data.get("fetch_time", int(time.time())),
+                token_data.get("shop_id", SHOP_ID),
+                token_data.get("merchant_id"),
+            ))
+            self.conn.commit()
+            return self.cursor.fetchone()["id"]
+        finally:
+            self.close()
+
+    def load_token(self):
+        try:
+            self.connect()
+            self.cursor.execute("""
+                SELECT 
+                    access_token, refresh_token, expire_in, fetch_time,
+                    shop_id, merchant_id
+                FROM shopee_token
+                ORDER BY updated_at DESC
+                LIMIT 1
+            """)
+            return self.cursor.fetchone()
+        finally:
+            self.close()
+
+    def clear_token(self):
+        try:
+            self.connect()
+            self.cursor.execute("TRUNCATE TABLE shopee_token")
             self.conn.commit()
         finally:
             self.close()
@@ -443,6 +487,52 @@ def apply_filters(df, status_filter, show_preorders_only):
     
     return filtered_df
 
+def handle_authentication(db):
+    """Handle the Shopee authentication flow using database storage"""
+    if st.session_state.authentication_state != "complete":
+        st.info("Please authenticate with your Shopee account to continue.")
+        auth_url = get_auth_url()
+        st.markdown(f"[🔐 Authenticate with Shopee]({auth_url})")
+        
+        if "code" in st.query_params:
+            with st.spinner("Authenticating..."):
+                try:
+                    code = st.query_params["code"]
+                    token = fetch_token(code)
+                    # Add fetch time to token data
+                    token["fetch_time"] = int(time.time())
+                    db.save_token(token)
+                    st.session_state.authentication_state = "complete"
+                    st.query_params.clear()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Authentication failed: {str(e)}")
+                    db.clear_token()
+        return False
+    return True
+
+def check_token_validity(db):
+    """Check if the stored token is valid"""
+    token = db.load_token()
+    if not token:
+        return None
+    
+    current_time = int(time.time())
+    token_age = current_time - token["fetch_time"]
+    
+    # If token is expired or close to expiring, try to refresh it
+    if token_age > (token["expire_in"] - 300):  # Refresh if less than 5 minutes remaining
+        try:
+            new_token = refresh_access_token(token["refresh_token"])
+            new_token["fetch_time"] = current_time
+            db.save_token(new_token)
+            return new_token
+        except Exception:
+            db.clear_token()
+            return None
+    
+    return token
+
 def main():
     st.set_page_config(page_title="Shopee Order Management", layout="wide")
     
@@ -450,40 +540,45 @@ def main():
     db = OrderDatabase()
     db.init_tables()
     initialize_session_state()
+
+    if not handle_authentication(db):
+        return
+
+    # Check token validity
+    token = check_token_validity(db)
+    if not token:
+        st.error("Token not found or invalid")
+        st.session_state.authentication_state = "initial"
+        st.rerun()
     
     # Sidebar controls
     with st.sidebar:
         st.header("Controls")
-        
-        # Admin-specific controls
-        if st.session_state.get('is_admin', False):
-            if st.session_state.authentication_state == "complete":
-                if st.button("🔄 Refresh Orders"):
-                    st.session_state.orders_need_refresh = True
-                    st.session_state.order_details = []
-                    st.session_state.orders_df = pd.DataFrame()
-                    st.session_state.last_edited_df = None
-                    st.rerun()
-                
-                st.divider()
-                st.subheader("Filters")
-                status_filter = st.selectbox(
-                    "Order Status",
-                    ["All", "UNPAID", "READY_TO_SHIP", "SHIPPED", "COMPLETED", "CANCELLED"]
-                )
-                show_preorders_only = st.checkbox("Show Preorders Only")
-                
-                st.divider()
-                if st.button("📊 View Statistics"):
-                    st.session_state.show_stats = not st.session_state.get('show_stats', False)
-                
-                st.divider()
-                if st.button("🚪 Logout"):
-                    clear_token()
-                    st.session_state.clear()
-                    st.rerun()
-            else:
-                st.info("Authenticate with Shopee to manage orders")
+        if st.session_state.authentication_state == "complete":
+            if st.button("🔄 Refresh Orders"):
+                st.session_state.orders_need_refresh = True
+                st.session_state.order_details = []
+                st.session_state.orders_df = pd.DataFrame()
+                st.session_state.last_edited_df = None
+                st.rerun()
+            
+            st.divider()
+            st.subheader("Filters")
+            status_filter = st.selectbox(
+                "Order Status",
+                ["All", "UNPAID", "READY_TO_SHIP", "SHIPPED", "COMPLETED", "CANCELLED"]
+            )
+            show_preorders_only = st.checkbox("Show Preorders Only")
+            
+            st.divider()
+            if st.button("📊 View Statistics"):
+                st.session_state.show_stats = not st.session_state.get('show_stats', False)
+            
+            st.divider()
+            if st.button("🚪 Logout"):
+                clear_token()
+                st.session_state.clear()
+                st.rerun()
 
     # Main content
     st.title("📦 Shopee Order Management")
@@ -492,7 +587,6 @@ def main():
     if not handle_authentication():
         return
 
-    # Verify token and admin status
     token = load_token()
     if not token or "access_token" not in token:
         st.error("Token not found or invalid")
