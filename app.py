@@ -381,39 +381,46 @@ def initialize_session_state():
         st.session_state.orders_need_refresh = True
     if "orders_df" not in st.session_state:
         st.session_state.orders_df = pd.DataFrame()
-    if "edit_counter" not in st.session_state:
-        st.session_state.edit_counter = 0
-    if "processing_edit" not in st.session_state:
-        st.session_state.processing_edit = False
+    if "previous_df" not in st.session_state:
+        st.session_state.previous_df = None
 
 
-def handle_edit():
-    """Handle data editor changes"""
-    if st.session_state.processing_edit:
-        return
-
-    st.session_state.processing_edit = True
-    try:
-        if "orders_editor" in st.session_state:
+def handle_cell_edit(edited_rows):
+    """Handle edits made in the data editor"""
+    if edited_rows:
+        try:
             db = OrderDatabase()
-            edited_df = st.session_state.orders_df.copy()
+            current_df = st.session_state.orders_df
             
-            order_sn = edited_df["Order Number"].iloc[st.session_state.edit_counter]
-            product = edited_df["Product"].iloc[st.session_state.edit_counter]
-            received = bool(edited_df["Received"].iloc[st.session_state.edit_counter])
-            missing = int(edited_df["Missing"].iloc[st.session_state.edit_counter]) if pd.notna(edited_df["Missing"].iloc[st.session_state.edit_counter]) else 0
-            note = str(edited_df["Note"].iloc[st.session_state.edit_counter]) if pd.notna(edited_df["Note"].iloc[st.session_state.edit_counter]) else ""
+            for idx, edited_data in edited_rows.items():
+                # Get the row from the current DataFrame
+                row = current_df.iloc[int(idx)]
+                
+                # Extract values, using edited data if available or falling back to original row data
+                order_sn = row["Order Number"]
+                product_name = row["Product"]
+                received = edited_data.get("Received", row["Received"])
+                missing = edited_data.get("Missing", row["Missing"])
+                note = edited_data.get("Note", row["Note"])
+                
+                # Ensure proper type conversion
+                received = bool(received)
+                missing = int(missing) if pd.notna(missing) else 0
+                note = str(note) if pd.notna(note) else ""
+                
+                # Save to database
+                db.upsert_order_tracking(
+                    order_sn=order_sn,
+                    product_name=product_name,
+                    received=received,
+                    missing_count=missing,
+                    note=note
+                )
             
-            db.upsert_order_tracking(
-                order_sn=order_sn,
-                product_name=product,
-                received=received,
-                missing_count=missing,
-                note=note
-            )
-            st.toast("Change saved!")
-    finally:
-        st.session_state.processing_edit = False
+            st.toast("Changes saved successfully!")
+            
+        except Exception as e:
+            st.error(f"Error saving changes: {str(e)}")
 
 
 def handle_authentication():
@@ -734,12 +741,12 @@ def main():
             num_rows="fixed",
             height=600,
             disabled=["Order Number", "Created", "Product", "Quantity", "Image", "Item Spec", "Item Number"],
-            on_change=handle_edit
+            on_edit=handle_cell_edit
         )
 
-        # Update the orders DataFrame without triggering rerun
-        if "orders_df" in st.session_state:
-            st.session_state.orders_df.update(edited_df)
+        # Update main DataFrame if needed
+        if "orders_df" in st.session_state and edited_df is not None:
+            st.session_state.orders_df = edited_df.copy()
           
         
         # Statistics and Metrics
