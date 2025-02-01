@@ -370,6 +370,38 @@ def initialize_session_state():
         st.session_state.orders_df = pd.DataFrame()
     if "last_saved_state" not in st.session_state:
         st.session_state.last_saved_state = None
+    if "needs_save" not in st.session_state:
+        st.session_state.needs_save = False
+    if "pending_changes" not in st.session_state:
+        st.session_state.pending_changes = []
+
+def on_change(key):
+    """Callback for data editor changes"""
+    if key not in st.session_state:
+        return
+        
+    edited_df = st.session_state[key]
+    if "last_saved_state" not in st.session_state:
+        st.session_state.last_saved_state = edited_df.copy()
+        return
+
+    editable_cols = ["Received", "Missing", "Note"]
+    changes = []
+    
+    for idx, row in edited_df.iterrows():
+        last_row = st.session_state.last_saved_state.iloc[idx]
+        if (row[editable_cols] != last_row[editable_cols]).any():
+            changes.append((
+                str(row["Order Number"]),
+                str(row["Product"]),
+                bool(row["Received"]),
+                int(row["Missing"]),
+                str(row["Note"])
+            ))
+    
+    if changes:
+        st.session_state.pending_changes = changes
+        st.session_state.needs_save = True
 
 def handle_edit(edited_df, db):
     """Handle edits more efficiently"""
@@ -710,41 +742,22 @@ def main():
             filtered_df,
             column_config=column_config,
             use_container_width=True,
-            key="orders_editor",  # Remove dynamic key
+            key="orders_editor",
             num_rows="fixed",
             height=600,
-            disabled=["Order Number", "Created", "Product", "Quantity", "Image", "Item Spec", "Item Number"]  # Make non-editable columns disabled
+            disabled=["Order Number", "Created", "Product", "Quantity", "Image", "Item Spec", "Item Number"],
+            on_change=on_change,
+            args=("orders_editor",)
         )
 
-        # Only process changes when they actually happen
-        if "last_saved_state" not in st.session_state:
+        # After the data editor, handle any pending saves
+        if st.session_state.needs_save:
+            db.batch_upsert_order_tracking(st.session_state.pending_changes)
+            st.session_state.orders_df = update_orders_df(st.session_state.orders_df, edited_df)
             st.session_state.last_saved_state = edited_df.copy()
-        else:
-            # Check if there are actual changes in the editable columns
-            changed = False
-            editable_cols = ["Received", "Missing", "Note"]
-            
-            if not edited_df[editable_cols].equals(st.session_state.last_saved_state[editable_cols]):
-                changed = True
-                
-            if changed:
-                changes = []
-                for idx, row in edited_df.iterrows():
-                    last_row = st.session_state.last_saved_state.iloc[idx]
-                    if (row[editable_cols] != last_row[editable_cols]).any():
-                        changes.append((
-                            str(row["Order Number"]),
-                            str(row["Product"]),
-                            bool(row["Received"]),
-                            int(row["Missing"]),
-                            str(row["Note"])
-                        ))
-                
-                if changes:
-                    db.batch_upsert_order_tracking(changes)
-                    st.session_state.orders_df = update_orders_df(st.session_state.orders_df, edited_df)
-                    st.session_state.last_saved_state = edited_df.copy()
-                    st.toast("Changes saved!")
+            st.session_state.pending_changes = []
+            st.session_state.needs_save = False
+            st.toast("Changes saved!")
           
         
         # Statistics and Metrics
