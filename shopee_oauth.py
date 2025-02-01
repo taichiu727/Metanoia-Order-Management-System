@@ -11,7 +11,7 @@ import streamlit as st
 CLIENT_ID = "2007044"
 CLIENT_SECRET = "5a7a4d6469566c446b645866566478674c6f594f4d4a6d46494b5a6b714e4457"
 SHOP_ID = 26174521
-REDIRECT_URI = "https://metanoia-order.streamlit.app/"
+REDIRECT_URI = "http://localhost:8501"
 
 def generate_signature(partner_id, partner_key, path, timestamp):
     base_string = f"{partner_id}{path}{timestamp}".encode()
@@ -67,69 +67,72 @@ def fetch_token(code):
     except requests.exceptions.RequestException as e:
         raise Exception(f"Request failed: {str(e)}")
 
-def refresh_token(refresh_token):
-    """Refresh the access token using refresh token"""
-    timestamp = int(time.time())
-    path = "/api/v2/auth/access_token/get"
-    signature = generate_signature(CLIENT_ID, CLIENT_SECRET, path, timestamp)
-    
-    url = f"https://partner.shopeemobile.com{path}"
-    params = {
-        "partner_id": CLIENT_ID,
-        "timestamp": timestamp,
-        "sign": signature
-    }
-    
-    payload = {
-        "refresh_token": refresh_token,
-        "shop_id": SHOP_ID,
-        "partner_id": int(CLIENT_ID)
-    }
-    
+def save_token(token):
+    with open("shopee_token.json", "w") as f:
+        json.dump(token, f)
+
+def load_token():
     try:
-        response = requests.post(url, params=params, json=payload)
-        
-        if response.status_code == 200:
-            data = response.json()
-            if "error" in data and data["error"]:
-                raise ValueError(f"API Error: {data.get('message', 'No error message provided')}")
-            if "access_token" not in data:
-                raise ValueError("Access token missing in response")
-            # Add fetch time to token data
-            data["fetch_time"] = int(time.time())
-            return data
-        else:
-            raise Exception(f"API Error: Status {response.status_code} - {response.text}")
-            
-    except requests.exceptions.RequestException as e:
-        raise Exception(f"Request failed: {str(e)}")
-
-def is_token_valid(token_data):
-    """Check if the token is still valid"""
-    if not token_data:
-        return False
-        
-    current_time = int(time.time())
-    fetch_time = token_data.get("fetch_time", 0)
-    expire_in = token_data.get("expire_in", 0)
-    
-    # Consider token invalid if it expires in less than 5 minutes
-    return (fetch_time + expire_in - current_time) > 300
-
-def get_valid_token(db):
-    """Get a valid token from database, refresh if needed"""
-    token_data = db.load_token()
-    
-    if not token_data:
+        if os.path.exists("shopee_token.json"):
+            with open("shopee_token.json", "r") as f:
+                return json.load(f)
+    except (json.JSONDecodeError, IOError):
         return None
+    return None
+
+def clear_token():
+    if os.path.exists("shopee_token.json"):
+        os.remove("shopee_token.json")
+
+# app.py
+def main():
+    st.title("Shopee Orders Tracker")
+    
+    # Initialize session states
+    if "authentication_state" not in st.session_state:
+        st.session_state.authentication_state = "initial"  # possible states: initial, pending, complete
+    
+    # Handle authentication flow
+    if st.session_state.authentication_state != "complete":
+        auth_url = get_auth_url()
+        st.markdown(f"[Authenticate with Shopee]({auth_url})")
         
-    if not is_token_valid(token_data):
-        try:
-            new_token_data = refresh_token(token_data["refresh_token"])
-            if new_token_data:
-                db.save_token(new_token_data)
-                return new_token_data
-        except Exception:
-            return None
+        # Check for authentication code
+        params = st.query_params
+        if "code" in params:
+            try:
+                code = params["code"]
+                # Clear the code from URL to prevent reuse
+                st.session_state.authentication_state = "pending"
+                
+                token = fetch_token(code)
+                save_token(token)
+                st.session_state.authentication_state = "complete"
+                # Clear query parameters
+                st.query_params.clear()
+                st.rerun()
+                
+            except Exception as e:
+                st.error(f"Authentication failed: {str(e)}")
+                st.session_state.authentication_state = "initial"
+                # Clear any existing token
+                clear_token()
+    else:
+        token = load_token()
+        if token and "access_token" in token:
+            # Show last 4 characters of token for verification
+            token_preview = f"...{token['access_token'][-4:]}"
+            st.success(f"Authenticated! Token: {token_preview}")
             
-    return token_data
+            # Add logout button
+            if st.button("Logout"):
+                clear_token()
+                st.session_state.authentication_state = "initial"
+                st.rerun()
+        else:
+            st.error("Token not found or invalid")
+            st.session_state.authentication_state = "initial"
+            st.rerun()
+
+if __name__ == "__main__":
+    main()
