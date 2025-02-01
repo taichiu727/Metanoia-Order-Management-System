@@ -24,6 +24,23 @@ class OrderDatabase:
         self.conn = None
         self.cursor = None
     
+    def get_order_tracking(self):
+    """Fetch all order tracking records from the database"""
+    try:
+        self.connect()
+        self.cursor.execute("""
+            SELECT 
+                order_sn,
+                product_name,
+                received,
+                missing_count,
+                note
+            FROM order_tracking
+        """)
+        return self.cursor.fetchall()
+    finally:
+        self.close()
+    
     def connect(self):
         try:
             self.conn = psycopg2.connect(DATABASE_URL)
@@ -143,8 +160,7 @@ class OrderDatabase:
             self.conn.commit()
         finally:
             self.close()
-
-def batch_upsert_order_tracking(self, records):
+    def batch_upsert_order_tracking(self, records):
     try:
         self.connect()
         # Add transaction management
@@ -165,22 +181,9 @@ def batch_upsert_order_tracking(self, records):
     finally:
         self.close()
 
-def get_order_tracking(self):
-    """Fetch all order tracking records from the database"""
-    try:
-        self.connect()
-        self.cursor.execute("""
-            SELECT 
-                order_sn,
-                product_name,
-                received,
-                missing_count,
-                note
-            FROM order_tracking
-        """)
-        return self.cursor.fetchall()
-    finally:
-        self.close()
+
+
+
 
 def generate_api_signature(api_type, partner_id, path, timestamp, access_token, shop_id, client_secret):
     """Generate Shopee API signature"""
