@@ -6,6 +6,7 @@ from shopee_oauth import (
     fetch_token, 
     save_token, 
     load_token,
+    is_admin,
     CLIENT_ID,
     CLIENT_SECRET,
     SHOP_ID,
