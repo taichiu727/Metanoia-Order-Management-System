@@ -463,24 +463,30 @@ def fetch_and_process_orders(token, db):
 
 def handle_data_editor_changes(edited_data, db):
     """Handle changes made in the data editor without causing reruns"""
+    # Convert the edited_data to a list of dictionaries format
+    current_data = []
+    for i in range(len(edited_data['Order Number'])):
+        row = {}
+        for col in edited_data.keys():
+            row[col] = edited_data[col][i]
+        current_data.append(row)
+    
+    current_df = pd.DataFrame(current_data)
+    
     if "last_edited_df" not in st.session_state:
-        st.session_state.last_edited_df = pd.DataFrame(edited_data)
+        st.session_state.last_edited_df = current_df.copy()
         return
 
-    current_df = pd.DataFrame(edited_data)
     changes = []
-    
-    for index in current_df.index:
-        current_row = current_df.loc[index]
-        last_row = st.session_state.last_edited_df.loc[index]
-        
-        if (current_row[["Received", "Missing", "Note"]] != last_row[["Received", "Missing", "Note"]]).any():
+    for idx, row in current_df.iterrows():
+        last_row = st.session_state.last_edited_df.iloc[idx]
+        if (row[["Received", "Missing", "Note"]] != last_row[["Received", "Missing", "Note"]]).any():
             changes.append((
-                str(current_row["Order Number"]),
-                str(current_row["Product"]),
-                bool(current_row["Received"]),
-                int(current_row["Missing"]),
-                str(current_row["Note"])
+                str(row["Order Number"]),
+                str(row["Product"]),
+                bool(row["Received"]),
+                int(row["Missing"]),
+                str(row["Note"])
             ))
     
     if changes:
@@ -685,7 +691,7 @@ def main():
 
         # Use data_editor with automatic saving
         # Use data_editor with callback
-        edited_df = st.data_editor(
+        edited_data = st.data_editor(
             st.session_state.orders_df,
             column_config=column_config,
             use_container_width=True,
@@ -698,8 +704,15 @@ def main():
             )
         )
 
-        # Update the main dataframe in session state
-        st.session_state.orders_df = edited_df.copy()
+            # Convert edited_data to DataFrame and update session state
+        if edited_data:
+            current_data = []
+            for i in range(len(edited_data['Order Number'])):
+                row = {}
+                for col in edited_data.keys():
+                    row[col] = edited_data[col][i]
+                current_data.append(row)
+            st.session_state.orders_df = pd.DataFrame(current_data)
 
         # Handle changes automatically when detected
         if st.session_state.pending_changes:
