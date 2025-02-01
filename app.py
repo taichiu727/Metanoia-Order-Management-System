@@ -467,19 +467,13 @@ def handle_data_editor_changes(edited_df, db):
         for idx, row in edited_df.iterrows():
             last_row = st.session_state.last_edited_df.iloc[idx]
             if (row[["Received", "Missing", "Note"]] != last_row[["Received", "Missing", "Note"]]).any():
-                changes.append((
-                    str(row["Order Number"]),
-                    str(row["Product"]),
-                    bool(row["Received"]),
-                    int(row["Missing"]),
-                    str(row["Note"])
-                ))
+                changes.append((str(row["Order Number"]), str(row["Product"]), bool(row["Received"]), int(row["Missing"]), str(row["Note"])))
         
         if changes:
-                db.batch_upsert_order_tracking(changes)
-                st.session_state.last_edited_df = edited_df.copy()
-                st.toast("Changes saved automatically!")
-                return True
+            db.batch_upsert_order_tracking(changes)
+            st.session_state.last_edited_df = edited_df.copy()
+            st.toast("Changes saved automatically!")
+            return True
     else:
         st.session_state.last_edited_df = edited_df.copy()
     return False
