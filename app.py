@@ -596,7 +596,7 @@ def main():
     status_filter = "ALL"
     show_preorders_only = False
    
-   column_config = {
+    column_config = {
         "Order Number": st.column_config.TextColumn(
             "Order Number",
             width="small",
