@@ -388,34 +388,33 @@ def initialize_session_state():
 
 def handle_editor_change():
     """Callback function for data editor changes"""
-    if st.session_state.orders_editor is not None:
-        current_data = st.session_state.orders_editor
-        if st.session_state.previous_data is not None:
-            db = OrderDatabase()
-            changes = []
-            
-            # Compare current data with previous data
-            for idx, row in current_data.iterrows():
-                prev_row = st.session_state.previous_data.iloc[idx]
-                if any(row[col] != prev_row[col] for col in ["Received", "Missing", "Note"]):
-                    changes.append((
-                        str(row["Order Number"]),
-                        str(row["Product"]),
-                        bool(row["Received"]),
-                        int(row["Missing"]),
-                        str(row["Note"])
-                    ))
-            
-            # Batch update if there are changes
-            if changes:
-                try:
-                    db.batch_upsert_order_tracking(changes)
-                    st.toast("Changes saved successfully!")
-                except Exception as e:
-                    st.error(f"Error saving changes: {str(e)}")
+    if st.session_state.orders_editor is not None and st.session_state.previous_data is not None:
+        current_data = pd.DataFrame(st.session_state.orders_editor)
+        previous_data = st.session_state.previous_data
         
-        # Update previous data
-        st.session_state.previous_data = current_data.copy()
+        db = OrderDatabase()
+        changes = []
+        
+        # Compare current data with previous data
+        for idx, row in current_data.iterrows():
+            prev_row = previous_data.iloc[idx]
+            if any(row[col] != prev_row[col] for col in ["Received", "Missing", "Note"]):
+                changes.append((
+                    str(row["Order Number"]),
+                    str(row["Product"]),
+                    bool(row["Received"]),
+                    int(row["Missing"]) if pd.notna(row["Missing"]) else 0,
+                    str(row["Note"]) if pd.notna(row["Note"]) else ""
+                ))
+        
+        # Batch update if there are changes
+        if changes:
+            try:
+                db.batch_upsert_order_tracking(changes)
+                st.session_state.previous_data = current_data.copy()  # Update previous data after successful save
+                st.toast("Changes saved successfully!")
+            except Exception as e:
+                st.error(f"Error saving changes: {str(e)}")
 
 
 def handle_authentication():
@@ -739,9 +738,10 @@ def main():
             disabled=["Order Number", "Created", "Product", "Quantity", "Image", "Item Spec", "Item Number"],
             on_change=handle_editor_change
         )
-
-        # Update the main DataFrame in session state
-        st.session_state.orders_df = update_orders_df(st.session_state.orders_df, edited_df)
+        
+        # Update the main DataFrame in session state without triggering a rerun
+        if "orders_df" in st.session_state:
+            st.session_state.orders_df = update_orders_df(st.session_state.orders_df, edited_df)
           
         
         # Statistics and Metrics
