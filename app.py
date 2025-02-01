@@ -7,8 +7,7 @@ from shopee_oauth import (
     refresh_token,
     CLIENT_ID,
     CLIENT_SECRET,
-    SHOP_ID,
-    clear_token
+    SHOP_ID
 )
 import requests
 import hashlib
