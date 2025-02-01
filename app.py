@@ -677,7 +677,6 @@ def main():
             num_rows="fixed",
             height=600,
             on_change=lambda: setattr(st.session_state, 'pending_changes', True),
-            debounce=True  # Add debounce to reduce rapid reruns
         )
 
         # Handle changes automatically when detected
