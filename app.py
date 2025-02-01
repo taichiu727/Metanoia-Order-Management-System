@@ -368,14 +368,11 @@ def initialize_session_state():
         st.session_state.orders_need_refresh = True
     if "orders_df" not in st.session_state:
         st.session_state.orders_df = pd.DataFrame()
-    if "last_edited_df" not in st.session_state:
-        st.session_state.last_edited_df = None
-    if "last_edit_key" not in st.session_state:
-        st.session_state.last_edit_key = 0
+    if "edited_rows" not in st.session_state:
+        st.session_state.edited_rows = {}
 
-def on_edit():
-    """Callback when data editor changes"""
-    st.session_state.last_edit_key += 1
+def on_data_change(edited_rows):
+    st.session_state.edited_rows = edited_rows
 
 
 def handle_authentication():
@@ -677,39 +674,49 @@ def main():
             )
         }
 
-        current_edit_key = st.session_state.last_edit_key
+ 
     
         # Use data editor
         edited_df = st.data_editor(
             filtered_df,
             column_config=column_config,
             use_container_width=True,
-            key=f"orders_editor_{current_edit_key}",  # Use dynamic key
+            key="orders_editor",
             num_rows="fixed",
             height=600,
-            on_change=on_edit
+            on_change=lambda: on_data_change(edited_df.to_dict('records'))
         )
 
-        if "last_saved_df" not in st.session_state:
-            st.session_state.last_saved_df = edited_df.copy()
-        elif not edited_df.equals(st.session_state.last_saved_df):
-            changes = []
-            for idx, row in edited_df.iterrows():
-                last_row = st.session_state.last_saved_df.iloc[idx]
-                if (row[["Received", "Missing", "Note"]] != last_row[["Received", "Missing", "Note"]]).any():
-                    changes.append((
-                        str(row["Order Number"]), 
-                        str(row["Product"]), 
-                        bool(row["Received"]), 
-                        int(row["Missing"]), 
-                        str(row["Note"])
-                    ))
-            
-            if changes:
-                db.batch_upsert_order_tracking(changes)
-                st.session_state.last_saved_df = edited_df.copy()
-                st.session_state.orders_df = update_orders_df(st.session_state.orders_df, edited_df)
-                st.toast("Changes saved!")
+        # Handle changes
+        if st.session_state.edited_rows:
+            current_data = edited_df.to_dict('records')
+            if current_data != st.session_state.edited_rows:
+                changes = []
+                for row in current_data:
+                    old_row = next(
+                        (r for r in st.session_state.edited_rows 
+                         if r["Order Number"] == row["Order Number"] 
+                         and r["Product"] == row["Product"]), 
+                        None
+                    )
+                    if old_row and (
+                        row["Received"] != old_row["Received"] or
+                        row["Missing"] != old_row["Missing"] or
+                        row["Note"] != old_row["Note"]
+                    ):
+                        changes.append((
+                            str(row["Order Number"]),
+                            str(row["Product"]),
+                            bool(row["Received"]),
+                            int(row["Missing"]),
+                            str(row["Note"])
+                        ))
+                
+                if changes:
+                    db.batch_upsert_order_tracking(changes)
+                    st.session_state.orders_df = update_orders_df(st.session_state.orders_df, edited_df)
+                    st.session_state.edited_rows = current_data
+                    st.toast("Changes saved!")
 
         # Statistics and Metrics
         if st.session_state.get('show_stats', False):
