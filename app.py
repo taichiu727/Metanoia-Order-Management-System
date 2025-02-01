@@ -647,6 +647,7 @@ def main():
 
     if not st.session_state.orders_df.empty:
         # Configure the data editor with explicit onChange handling
+        filtered_df = apply_filters(st.session_state.orders_df, status_filter, show_preorders_only)
         edited_df = st.data_editor(
             filtered_df,
             column_config=column_config,
