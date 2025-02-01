@@ -386,16 +386,15 @@ def handle_authentication():
                 try:
                     code = st.query_params["code"]
                     token = fetch_token(code)
-                    #save_token(token)
+                    save_token(token)
                     st.session_state.authentication_state = "complete"
                     st.query_params.clear()
-                    #st.rerun()
+                    st.rerun()
                 except Exception as e:
                     st.error(f"Authentication failed: {str(e)}")
-                   
+                    clear_token()
         return False
     return True
-
 
 def fetch_and_process_orders(token, db):
     """Fetch orders and process them into a DataFrame"""
@@ -452,7 +451,6 @@ def fetch_and_process_orders(token, db):
                         "Product": item["item_name"],
                         "Quantity": item["model_quantity_purchased"],
                         "Image": item["image_info"]["image_url"],
-                        "Item Spec": item["model_name"],
                         "Item Number": item["item_sku"],
                         "Received": tracking['received'],
                         "Missing": tracking['missing_count'],
@@ -468,13 +466,19 @@ def handle_data_editor_changes(edited_df, db):
         for idx, row in edited_df.iterrows():
             last_row = st.session_state.last_edited_df.iloc[idx]
             if (row[["Received", "Missing", "Note"]] != last_row[["Received", "Missing", "Note"]]).any():
-                changes.append((str(row["Order Number"]), str(row["Product"]), bool(row["Received"]), int(row["Missing"]), str(row["Note"])))
+                changes.append((
+                    str(row["Order Number"]),
+                    str(row["Product"]),
+                    bool(row["Received"]),
+                    int(row["Missing"]),
+                    str(row["Note"])
+                ))
         
         if changes:
-            db.batch_upsert_order_tracking(changes)
-            st.session_state.last_edited_df = edited_df.copy()
-            st.toast("Changes saved automatically!")
-            return True  # No rerun needed here
+                db.batch_upsert_order_tracking(changes)
+                st.session_state.last_edited_df = edited_df.copy()
+                st.toast("Changes saved automatically!")
+                return True
     else:
         st.session_state.last_edited_df = edited_df.copy()
     return False
@@ -514,7 +518,7 @@ def handle_authentication(db):
                     db.save_token(token)
                     st.session_state.authentication_state = "complete"
                     st.query_params.clear()
-                    #st.rerun()
+                    st.rerun()
                 except Exception as e:
                     st.error(f"Authentication failed: {str(e)}")
                     db.clear_token()
@@ -553,13 +557,6 @@ def check_token_validity(db):
     
     return token
 
-def update_orders_df(original_df, edited_df):
-    """Update the main orders DataFrame with edited changes"""
-    update_cols = ["Received", "Missing", "Note"]
-    return original_df.set_index(['Order Number', 'Product']).combine_first(
-        edited_df.set_index(['Order Number', 'Product'])[update_cols]
-    ).reset_index()
-
 def main():
     st.set_page_config(page_title="Shopee Order Management", layout="wide")
     
@@ -568,6 +565,8 @@ def main():
     db.init_tables()
     initialize_session_state()
 
+   
+    
     # Sidebar controls
     with st.sidebar:
         st.header("Controls")
@@ -577,7 +576,7 @@ def main():
                 st.session_state.order_details = []
                 st.session_state.orders_df = pd.DataFrame()
                 st.session_state.last_edited_df = None
-                st.experimental_rerun()
+                st.rerun()
             
             st.divider()
             st.subheader("Filters")
@@ -595,7 +594,7 @@ def main():
             if st.button("🚪 Logout"):
                 clear_token()
                 st.session_state.clear()
-                st.experimental_rerun()
+                st.rerun()
 
     # Main content
     st.title("📦 Shopee Order Management")
@@ -609,7 +608,7 @@ def main():
     if not token:
         st.error("Token not found or invalid")
         st.session_state.authentication_state = "initial"
-        #st.experimental_rerun()
+        st.rerun()
 
     # Fetch and display orders
     if st.session_state.orders_need_refresh:
@@ -647,11 +646,6 @@ def main():
                 width="small",
                 help="Product image"
             ),
-             "Item Spec": st.column_config.TextColumn(
-                "Item Spec",
-                width="small",
-                help="Item Spec"
-            ),
             "Item Number": st.column_config.TextColumn(
                 "Item Number",
                 width="small",
@@ -682,19 +676,13 @@ def main():
             key="orders_editor",
             num_rows="fixed",
             height=600,
-            on_change=lambda: handle_data_editor_changes(edited_df, db), 
+            on_change=lambda: setattr(st.session_state, 'pending_changes', True)
         )
 
         # Handle changes automatically when detected
         if st.session_state.pending_changes:
             if handle_data_editor_changes(edited_df, db):
                 st.session_state.pending_changes = False
-                # Update filtered_df after changes
-                st.session_state.filtered_df = edited_df.copy()
-                st.session_state.orders_df = update_orders_df(
-                    st.session_state.orders_df,
-                    edited_df
-                )
 
         # Statistics and Metrics
         if st.session_state.get('show_stats', False):
