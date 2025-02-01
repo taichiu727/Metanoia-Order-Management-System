@@ -381,46 +381,52 @@ def initialize_session_state():
         st.session_state.orders_need_refresh = True
     if "orders_df" not in st.session_state:
         st.session_state.orders_df = pd.DataFrame()
-    if "previous_df" not in st.session_state:
-        st.session_state.previous_df = None
+    if "previous_data" not in st.session_state:
+        st.session_state.previous_data = None
 
 
-def handle_cell_edit(edited_rows):
-    """Handle edits made in the data editor"""
-    if edited_rows:
-        try:
-            db = OrderDatabase()
-            current_df = st.session_state.orders_df
-            
-            for idx, edited_data in edited_rows.items():
-                # Get the row from the current DataFrame
-                row = current_df.iloc[int(idx)]
-                
-                # Extract values, using edited data if available or falling back to original row data
-                order_sn = row["Order Number"]
-                product_name = row["Product"]
-                received = edited_data.get("Received", row["Received"])
-                missing = edited_data.get("Missing", row["Missing"])
-                note = edited_data.get("Note", row["Note"])
-                
-                # Ensure proper type conversion
-                received = bool(received)
-                missing = int(missing) if pd.notna(missing) else 0
-                note = str(note) if pd.notna(note) else ""
-                
-                # Save to database
+def on_data_change():
+    """Handle changes in the data editor"""
+    if "orders_editor" not in st.session_state:
+        return
+        
+    # Get the current data
+    current_data = st.session_state.orders_editor
+    
+    # If we don't have previous data to compare against, store current and return
+    if st.session_state.previous_data is None:
+        st.session_state.previous_data = current_data.copy()
+        return
+        
+    try:
+        db = OrderDatabase()
+        changes = []
+        
+        # Compare current data with previous data
+        for idx, row in current_data.iterrows():
+            prev_row = st.session_state.previous_data.iloc[idx]
+            if any(row[col] != prev_row[col] for col in ["Received", "Missing", "Note"]):
+                # Save the change to database
                 db.upsert_order_tracking(
-                    order_sn=order_sn,
-                    product_name=product_name,
-                    received=received,
-                    missing_count=missing,
-                    note=note
+                    order_sn=str(row["Order Number"]),
+                    product_name=str(row["Product"]),
+                    received=bool(row["Received"]),
+                    missing_count=int(row["Missing"]) if pd.notna(row["Missing"]) else 0,
+                    note=str(row["Note"]) if pd.notna(row["Note"]) else ""
                 )
+                changes.append(f"Updated {row['Order Number']} - {row['Product']}")
+        
+        # Update previous data with current state
+        st.session_state.previous_data = current_data.copy()
+        
+        # Update the main DataFrame
+        st.session_state.orders_df.update(current_data)
+        
+        if changes:
+            st.toast("✅ Changes saved!")
             
-            st.toast("Changes saved successfully!")
-            
-        except Exception as e:
-            st.error(f"Error saving changes: {str(e)}")
+    except Exception as e:
+        st.error(f"Error saving changes: {str(e)}")
 
 
 def handle_authentication():
@@ -732,7 +738,6 @@ def main():
 
     
         # Use data editor
-        # Use data editor
         edited_df = st.data_editor(
             filtered_df,
             column_config=column_config,
@@ -741,9 +746,8 @@ def main():
             num_rows="fixed",
             height=600,
             disabled=["Order Number", "Created", "Product", "Quantity", "Image", "Item Spec", "Item Number"],
-            on_edit=handle_cell_edit
+            on_change=on_data_change
         )
-
         # Update main DataFrame if needed
         if "orders_df" in st.session_state and edited_df is not None:
             st.session_state.orders_df = edited_df.copy()
