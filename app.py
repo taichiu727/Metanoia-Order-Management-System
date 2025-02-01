@@ -596,6 +596,53 @@ def main():
     status_filter = "ALL"
     show_preorders_only = False
    
+   column_config = {
+        "Order Number": st.column_config.TextColumn(
+            "Order Number",
+            width="small",
+            help="Shopee order number"
+        ),
+        "Created": st.column_config.TextColumn(
+            "Created",
+            width="small",
+            help="Order creation date and time"
+        ),
+        "Product": st.column_config.TextColumn(
+            "Product",
+            width="small",
+            help="Product name"
+        ),
+        "Quantity": st.column_config.NumberColumn(
+            "Quantity",
+            width="small",
+            help="Ordered quantity"
+        ),
+        "Image": st.column_config.ImageColumn(
+            "Image",
+            width="small",
+            help="Product image"
+        ),
+        "Item Number": st.column_config.TextColumn(
+            "Item Number",
+            width="small",
+            help="Item Number"
+        ),
+        "Received": st.column_config.CheckboxColumn(
+            "Received",
+            width="small",
+            help="Mark if item has been received"
+        ),
+        "Missing": st.column_config.NumberColumn(
+            "Missing",
+            width="small",
+            help="Number of missing items"
+        ),
+        "Note": st.column_config.TextColumn(
+            "Note",
+            width="medium",
+            help="Additional notes"
+        )
+    }
     
     # Sidebar controls
     with st.sidebar:
