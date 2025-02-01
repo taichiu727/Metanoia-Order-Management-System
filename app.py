@@ -397,7 +397,7 @@ def handle_authentication():
     return True
 
 @st.cache_data
-def fetch_and_process_orders(token, db):
+def fetch_and_process_orders(token, _db):
     """Fetch orders and process them into a DataFrame"""
     with st.spinner("Fetching orders..."):
         orders_response = get_orders(
