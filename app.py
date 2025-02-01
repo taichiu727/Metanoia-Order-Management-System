@@ -541,15 +541,7 @@ def main():
     db.init_tables()
     initialize_session_state()
 
-    if not handle_authentication(db):
-        return
-
-    # Check token validity
-    token = check_token_validity(db)
-    if not token:
-        st.error("Token not found or invalid")
-        st.session_state.authentication_state = "initial"
-        st.rerun()
+   
     
     # Sidebar controls
     with st.sidebar:
@@ -584,11 +576,12 @@ def main():
     st.title("📦 Shopee Order Management")
     
     # Handle authentication
-    if not handle_authentication():
+    if not handle_authentication(db):
         return
 
-    token = load_token()
-    if not token or "access_token" not in token:
+    # Check token validity
+    token = check_token_validity(db)
+    if not token:
         st.error("Token not found or invalid")
         st.session_state.authentication_state = "initial"
         st.rerun()
