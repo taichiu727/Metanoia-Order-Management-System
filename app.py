@@ -461,27 +461,31 @@ def fetch_and_process_orders(token, db):
         
         return pd.DataFrame(orders_data)
 
-def handle_data_editor_changes(edited_df, db):
+def handle_data_editor_changes(edited_data, db):
     """Handle changes made in the data editor without causing reruns"""
     if "last_edited_df" not in st.session_state:
-        st.session_state.last_edited_df = edited_df.copy()
+        st.session_state.last_edited_df = pd.DataFrame(edited_data)
         return
 
+    current_df = pd.DataFrame(edited_data)
     changes = []
-    for idx, row in edited_df.iterrows():
-        last_row = st.session_state.last_edited_df.iloc[idx]
-        if (row[["Received", "Missing", "Note"]] != last_row[["Received", "Missing", "Note"]]).any():
+    
+    for index in current_df.index:
+        current_row = current_df.loc[index]
+        last_row = st.session_state.last_edited_df.loc[index]
+        
+        if (current_row[["Received", "Missing", "Note"]] != last_row[["Received", "Missing", "Note"]]).any():
             changes.append((
-                str(row["Order Number"]), 
-                str(row["Product"]), 
-                bool(row["Received"]), 
-                int(row["Missing"]), 
-                str(row["Note"])
+                str(current_row["Order Number"]),
+                str(current_row["Product"]),
+                bool(current_row["Received"]),
+                int(current_row["Missing"]),
+                str(current_row["Note"])
             ))
     
     if changes:
         db.batch_upsert_order_tracking(changes)
-        st.session_state.last_edited_df = edited_df.copy()
+        st.session_state.last_edited_df = current_df
         st.toast("Changes saved!")
 
 def apply_filters(df, status_filter, show_preorders_only):
