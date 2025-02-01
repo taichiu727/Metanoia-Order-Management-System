@@ -463,6 +463,9 @@ def fetch_and_process_orders(token, db):
 
 def handle_data_editor_changes(edited_df, db):
     """Handle changes made in the data editor"""
+    if "last_edited_df" not in st.session_state:
+        st.session_state.last_edited_df = edited_df.copy()
+        return
     if st.session_state.last_edited_df is not None:
         changes = []
         for idx, row in edited_df.iterrows():
