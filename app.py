@@ -452,6 +452,7 @@ def fetch_and_process_orders(token, db):
                         "Product": item["item_name"],
                         "Quantity": item["model_quantity_purchased"],
                         "Image": item["image_info"]["image_url"],
+                        "Item Spec": item["model_name"],
                         "Item Number": item["item_sku"],
                         "Received": tracking['received'],
                         "Missing": tracking['missing_count'],
@@ -473,7 +474,7 @@ def handle_data_editor_changes(edited_df, db):
             db.batch_upsert_order_tracking(changes)
             st.session_state.last_edited_df = edited_df.copy()
             st.toast("Changes saved automatically!")
-            return True
+            return True  # No rerun needed here
     else:
         st.session_state.last_edited_df = edited_df.copy()
     return False
@@ -646,6 +647,11 @@ def main():
                 width="small",
                 help="Product image"
             ),
+             "Item Spec": st.column_config.TextColumn(
+                "Item Spec",
+                width="small",
+                help="Item Spec"
+            ),
             "Item Number": st.column_config.TextColumn(
                 "Item Number",
                 width="small",
@@ -668,28 +674,27 @@ def main():
             )
         }
 
+        # Use data_editor with automatic saving
         edited_df = st.data_editor(
             filtered_df,
             column_config=column_config,
             use_container_width=True,
             key="orders_editor",
             num_rows="fixed",
-            height=600
+            height=600,
+            on_change=lambda: handle_data_editor_changes(edited_df, db), 
         )
 
-        # Add a Save Changes button
-        if st.button("💾 Save Changes"):
+        # Handle changes automatically when detected
+        if st.session_state.pending_changes:
             if handle_data_editor_changes(edited_df, db):
-                st.success("Changes saved successfully!")
-                # Update the filtered DataFrame in session state
+                st.session_state.pending_changes = False
+                # Update filtered_df after changes
                 st.session_state.filtered_df = edited_df.copy()
-                # Update the main orders DataFrame
                 st.session_state.orders_df = update_orders_df(
                     st.session_state.orders_df,
                     edited_df
                 )
-            else:
-                st.warning("No changes detected.")
 
         # Statistics and Metrics
         if st.session_state.get('show_stats', False):
