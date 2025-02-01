@@ -351,6 +351,14 @@ def initialize_session_state():
     """Initialize all session state variables"""
     if "authentication_state" not in st.session_state:
         st.session_state.authentication_state = "initial"
+        # Check for existing valid token
+        db = OrderDatabase()
+        token = db.load_token()
+        if token:
+            current_time = int(time.time())
+            token_age = current_time - token["fetch_time"]
+            if token_age < (token["expire_in"] - 300):  # Token is still valid
+                st.session_state.authentication_state = "complete"
     
     if "orders" not in st.session_state:
         st.session_state.orders = []
@@ -364,21 +372,7 @@ def initialize_session_state():
         st.session_state.last_edited_df = None
     if "pending_changes" not in st.session_state:
         st.session_state.pending_changes = False
-    if "last_update_time" not in st.session_state:
-        st.session_state.last_update_time = datetime.min  # Initialize to a very old timestamp
 
-
-def check_for_updates(db):
-    try:
-        db.connect()
-        db.cursor.execute("""
-            SELECT MAX(last_updated) AS last_update_time
-            FROM order_tracking
-        """)
-        result = db.cursor.fetchone()
-        return result["last_update_time"]
-    finally:
-        db.close()
 
 def handle_authentication():
     """Handle the Shopee authentication flow"""
@@ -573,13 +567,6 @@ def main():
 
     status_filter = "ALL"
     show_preorders_only = False
-
-    if time.time() - st.session_state.get("last_check_time", 0) > 5:
-        latest_update_time = check_for_updates(db)
-        if latest_update_time > st.session_state.last_update_time:
-            st.session_state.orders_need_refresh = True
-            st.session_state.last_update_time = latest_update_time
-        st.session_state.last_check_time = time.time()
    
     
     # Sidebar controls
