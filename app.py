@@ -386,10 +386,10 @@ def handle_authentication():
                 try:
                     code = st.query_params["code"]
                     token = fetch_token(code)
-                    save_token(token)
+                    #save_token(token)
                     st.session_state.authentication_state = "complete"
                     st.query_params.clear()
-                    st.rerun()
+                    #st.rerun()
                 except Exception as e:
                     st.error(f"Authentication failed: {str(e)}")
                    
