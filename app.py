@@ -383,47 +383,51 @@ def initialize_session_state():
         st.session_state.orders_df = pd.DataFrame()
     if "previous_data" not in st.session_state:
         st.session_state.previous_data = None
+    if "editor_change_count" not in st.session_state:
+        st.session_state.editor_change_count = 0
+
 
 
 def on_data_change():
     """Handle changes in the data editor"""
-    if "orders_editor" not in st.session_state:
-        return
-        
-    # Get the current data
-    current_data = st.session_state.orders_editor
-    
-    # If we don't have previous data to compare against, store current and return
-    if st.session_state.previous_data is None:
-        st.session_state.previous_data = current_data.copy()
+    if "orders_editor" not in st.session_state or not isinstance(st.session_state.orders_editor, dict):
         return
         
     try:
-        db = OrderDatabase()
-        changes = []
+        # Get the current data
+        edited_data = st.session_state.orders_editor
+        original_df = st.session_state.orders_df
         
-        # Compare current data with previous data
-        for idx, row in current_data.iterrows():
-            prev_row = st.session_state.previous_data.iloc[idx]
-            if any(row[col] != prev_row[col] for col in ["Received", "Missing", "Note"]):
-                # Save the change to database
-                db.upsert_order_tracking(
-                    order_sn=str(row["Order Number"]),
-                    product_name=str(row["Product"]),
-                    received=bool(row["Received"]),
-                    missing_count=int(row["Missing"]) if pd.notna(row["Missing"]) else 0,
-                    note=str(row["Note"]) if pd.notna(row["Note"]) else ""
-                )
-                changes.append(f"Updated {row['Order Number']} - {row['Product']}")
-        
-        # Update previous data with current state
-        st.session_state.previous_data = current_data.copy()
-        
-        # Update the main DataFrame
-        st.session_state.orders_df.update(current_data)
-        
-        if changes:
-            st.toast("✅ Changes saved!")
+        # Find the edited row by comparing with original DataFrame
+        for idx, edited_row_data in edited_data.items():
+            # Get the corresponding row from the original DataFrame
+            original_row = original_df.iloc[int(idx)]
+            
+            # Extract values
+            order_sn = original_row["Order Number"]
+            product_name = original_row["Product"]
+            
+            # Get edited values, fallback to original if not edited
+            received = edited_row_data.get("Received", original_row["Received"])
+            missing = edited_row_data.get("Missing", original_row["Missing"])
+            note = edited_row_data.get("Note", original_row["Note"])
+            
+            # Save to database
+            db = OrderDatabase()
+            db.upsert_order_tracking(
+                order_sn=str(order_sn),
+                product_name=str(product_name),
+                received=bool(received),
+                missing_count=int(missing) if pd.notna(missing) else 0,
+                note=str(note) if pd.notna(note) else ""
+            )
+            
+            # Update the DataFrame in session state
+            st.session_state.orders_df.at[int(idx), "Received"] = received
+            st.session_state.orders_df.at[int(idx), "Missing"] = missing
+            st.session_state.orders_df.at[int(idx), "Note"] = note
+            
+        st.toast("✅ Changes saved!")
             
     except Exception as e:
         st.error(f"Error saving changes: {str(e)}")
