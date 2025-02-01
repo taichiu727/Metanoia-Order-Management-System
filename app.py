@@ -581,6 +581,9 @@ def main():
     db.init_tables()
     initialize_session_state()
 
+    if st.session_state.last_edited_df is None:
+        st.session_state.last_edited_df = pd.DataFrame()
+
     # Sidebar controls
     with st.sidebar:
         st.header("Controls")
