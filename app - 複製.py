@@ -463,6 +463,7 @@ def fetch_and_process_orders(token, db):
 
 def handle_data_editor_changes(edited_df, db):
     """Handle changes made in the data editor"""
+    
     if st.session_state.last_edited_df is not None:
         changes = []
         for idx, row in edited_df.iterrows():
@@ -474,8 +475,10 @@ def handle_data_editor_changes(edited_df, db):
             db.batch_upsert_order_tracking(changes)
             st.session_state.last_edited_df = edited_df.copy()
             st.toast("Changes saved automatically!")
+            return True  # No rerun needed here
     else:
         st.session_state.last_edited_df = edited_df.copy()
+    return False
 
 def apply_filters(df, status_filter, show_preorders_only):
     """Apply filters to the DataFrame"""
@@ -679,18 +682,20 @@ def main():
             use_container_width=True,
             key="orders_editor",
             num_rows="fixed",
-            height=600
+            height=600,
+            on_change=lambda: handle_data_editor_changes(edited_df, db), 
         )
 
-        # Handle changes separately
-        if "orders_editor" in st.session_state:
-            handle_data_editor_changes(edited_df, db)
-            
-            # Update the main DataFrame with the changes
-            st.session_state.orders_df = update_orders_df(
-                st.session_state.orders_df,
-                edited_df
-            )
+        # Handle changes automatically when detected
+        if st.session_state.pending_changes:
+            if handle_data_editor_changes(edited_df, db):
+                st.session_state.pending_changes = False
+                # Update filtered_df after changes
+                st.session_state.filtered_df = edited_df.copy()
+                st.session_state.orders_df = update_orders_df(
+                    st.session_state.orders_df,
+                    edited_df
+                )
 
         # Statistics and Metrics
         if st.session_state.get('show_stats', False):
