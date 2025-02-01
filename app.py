@@ -166,15 +166,21 @@ def batch_upsert_order_tracking(self, records):
         self.close()
 
     def get_order_tracking(self):
-        try:
-            self.connect()
-            self.cursor.execute("""
-                SELECT order_sn, product_name, received, missing_count, note
-                FROM order_tracking
-            """)
-            return self.cursor.fetchall()
-        finally:
-            self.close()
+    """Fetch all order tracking records from the database"""
+    try:
+        self.connect()
+        self.cursor.execute("""
+            SELECT 
+                order_sn,
+                product_name,
+                received,
+                missing_count,
+                note
+            FROM order_tracking
+        """)
+        return self.cursor.fetchall()
+    finally:
+        self.close()
 
 def generate_api_signature(api_type, partner_id, path, timestamp, access_token, shop_id, client_secret):
     """Generate Shopee API signature"""
