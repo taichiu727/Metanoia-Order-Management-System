@@ -682,7 +682,7 @@ def main():
             key="orders_editor",
             num_rows="fixed",
             height=600,
-            on_change=lambda: None
+            on_change=lambda: handle_data_editor_changes(edited_df, db), 
         )
 
         # Handle changes automatically when detected
