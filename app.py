@@ -368,34 +368,21 @@ def initialize_session_state():
         st.session_state.orders_need_refresh = True
     if "orders_df" not in st.session_state:
         st.session_state.orders_df = pd.DataFrame()
-    if "pending_changes" not in st.session_state:
-        st.session_state.pending_changes = []
-    if "save_triggered" not in st.session_state:
-        st.session_state.save_triggered = False
     if "last_saved_state" not in st.session_state:
         st.session_state.last_saved_state = None
+    if "change_counter" not in st.session_state:
+        st.session_state.change_counter = 0
 
-def queue_change(edited_rows):
-    """Queue changes for batch processing"""
-    current_state = edited_rows.to_dict('records')
-    
+def handle_edit(edited_df, db):
+    """Handle edits more efficiently"""
     if st.session_state.last_saved_state is None:
-        st.session_state.last_saved_state = current_state
+        st.session_state.last_saved_state = edited_df.copy()
         return
-        
+
     changes = []
-    for row in current_state:
-        old_row = next(
-            (r for r in st.session_state.last_saved_state 
-             if r["Order Number"] == row["Order Number"] 
-             and r["Product"] == row["Product"]), 
-            None
-        )
-        if old_row and (
-            row["Received"] != old_row["Received"] or
-            row["Missing"] != old_row["Missing"] or
-            row["Note"] != old_row["Note"]
-        ):
+    for idx, row in edited_df.iterrows():
+        last_row = st.session_state.last_saved_state.iloc[idx]
+        if (row[["Received", "Missing", "Note"]] != last_row[["Received", "Missing", "Note"]]).any():
             changes.append((
                 str(row["Order Number"]),
                 str(row["Product"]),
@@ -403,27 +390,12 @@ def queue_change(edited_rows):
                 int(row["Missing"]),
                 str(row["Note"])
             ))
-    
+
     if changes:
-        st.session_state.pending_changes.extend(changes)
-        st.session_state.save_triggered = True
-        st.session_state.last_saved_state = current_state
-
-def save_pending_changes(db):
-    """Save all pending changes in batch"""
-    if st.session_state.pending_changes:
-        try:
-            db.batch_upsert_order_tracking(st.session_state.pending_changes)
-            st.session_state.pending_changes = []
-            st.session_state.save_triggered = False
-            return True
-        except Exception as e:
-            st.error(f"Error saving changes: {str(e)}")
-            return False
-    return False
-
-def on_data_change(edited_rows):
-    st.session_state.edited_rows = edited_rows
+        db.batch_upsert_order_tracking(changes)
+        st.session_state.orders_df = update_orders_df(st.session_state.orders_df, edited_df)
+        st.session_state.last_saved_state = edited_df.copy()
+        st.toast("Changes saved!")
 
 
 def handle_authentication():
@@ -735,32 +707,23 @@ def main():
  
     
         # Use data editor
-        with st.form(key="orders_form"):
-            # Use data editor inside form
+        with st.container():
             edited_df = st.data_editor(
                 filtered_df,
                 column_config=column_config,
                 use_container_width=True,
-                key="orders_editor",
+                key=f"orders_editor_{st.session_state.change_counter}",
                 num_rows="fixed",
-                height=600,
-                on_change=lambda: queue_change(edited_df)
+                height=600
             )
             
-            # Hidden submit button (can be triggered by key events)
-            submitted = st.form_submit_button("Save Changes", type="primary", use_container_width=True)
+            if st.session_state.last_saved_state is not None and not edited_df.equals(st.session_state.last_saved_state):
+                handle_edit(edited_df, db)
+                st.session_state.change_counter += 1  # Force refresh of editor
+            elif st.session_state.last_saved_state is None:
+                st.session_state.last_saved_state = edited_df.copy()
+          
         
-        # Auto-save changes after a short delay
-        if st.session_state.save_triggered:
-            time.sleep(0.5)  # Small delay to batch multiple quick changes
-            if save_pending_changes(db):
-                st.toast("Changes saved successfully!")
-                st.session_state.orders_df = update_orders_df(st.session_state.orders_df, edited_df)
-
-        # Show pending changes indicator if there are unsaved changes
-        if st.session_state.pending_changes:
-            st.info(f"There are {len(st.session_state.pending_changes)} pending changes to be saved.")
-
         # Statistics and Metrics
         if st.session_state.get('show_stats', False):
             st.subheader("📊 Order Statistics")
