@@ -668,27 +668,28 @@ def main():
             )
         }
 
-        # Use data_editor with automatic saving
         edited_df = st.data_editor(
             filtered_df,
             column_config=column_config,
             use_container_width=True,
             key="orders_editor",
             num_rows="fixed",
-            height=600,
-            on_change=lambda: setattr(st.session_state, 'pending_changes', True),
+            height=600
         )
 
-        # Handle changes automatically when detected
-        if st.session_state.pending_changes:
+        # Add a Save Changes button
+        if st.button("💾 Save Changes"):
             if handle_data_editor_changes(edited_df, db):
-                st.session_state.pending_changes = False
-                # Update filtered_df after changes
+                st.success("Changes saved successfully!")
+                # Update the filtered DataFrame in session state
                 st.session_state.filtered_df = edited_df.copy()
+                # Update the main orders DataFrame
                 st.session_state.orders_df = update_orders_df(
                     st.session_state.orders_df,
                     edited_df
                 )
+            else:
+                st.warning("No changes detected.")
 
         # Statistics and Metrics
         if st.session_state.get('show_stats', False):
