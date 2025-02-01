@@ -11,7 +11,7 @@ import streamlit as st
 CLIENT_ID = "2007044"
 CLIENT_SECRET = "5a7a4d6469566c446b645866566478674c6f594f4d4a6d46494b5a6b714e4457"
 SHOP_ID = 26174521
-REDIRECT_URI = "http://localhost:8501"
+REDIRECT_URI = "https://metanoia-order.streamlit.app/"
 
 def generate_signature(partner_id, partner_key, path, timestamp):
     base_string = f"{partner_id}{path}{timestamp}".encode()
