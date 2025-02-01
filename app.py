@@ -368,10 +368,10 @@ def initialize_session_state():
         st.session_state.orders_need_refresh = True
     if "orders_df" not in st.session_state:
         st.session_state.orders_df = pd.DataFrame()
-    if "edited_rows" not in st.session_state:
-        st.session_state.edited_rows = {}
-    if "show_save_button" not in st.session_state:
-        st.session_state.show_save_button = False
+    if "last_edited_df" not in st.session_state:
+        st.session_state.last_edited_df = None
+    if "pending_changes" not in st.session_state:
+        st.session_state.pending_changes = False
 
 
 def handle_authentication():
@@ -461,43 +461,34 @@ def fetch_and_process_orders(token, db):
         
         return pd.DataFrame(orders_data)
 
-def handle_data_editor_changes(edited_rows, db):
-    """Handle changes made in the data editor without immediate saves"""
-    if edited_rows is not None:
-        st.session_state.edited_rows.update(edited_rows)
-        st.session_state.show_save_button = True
-
-def save_changes(db):
-    """Save all accumulated changes to the database"""
-    if st.session_state.edited_rows:
+def handle_data_editor_changes(edited_df, db):
+    """Handle changes made in the data editor with debouncing"""
+    current_time = time.time()
+    last_change_time = st.session_state.get('last_change_time', 0)
+    
+    # Check if changes exist and debounce period (1 second) has passed
+    if st.session_state.last_edited_df is not None and (current_time - last_change_time) > 1:
         changes = []
-        for idx, row in st.session_state.edited_rows.items():
-            original_row = st.session_state.orders_df.iloc[int(idx)]
-            order_number = original_row["Order Number"]
-            product = original_row["Product"]
-            
-            # Only include fields that were actually changed
-            received = row.get("Received", original_row["Received"])
-            missing = row.get("Missing", original_row["Missing"])
-            note = row.get("Note", original_row["Note"])
-            
-            changes.append((str(order_number), str(product), bool(received), int(missing), str(note)))
+        for idx, row in edited_df.iterrows():
+            last_row = st.session_state.last_edited_df.iloc[idx]
+            if (row[["Received", "Missing", "Note"]] != last_row[["Received", "Missing", "Note"]]).any():
+                changes.append((
+                    str(row["Order Number"]), 
+                    str(row["Product"]), 
+                    bool(row["Received"]), 
+                    int(row["Missing"]), 
+                    str(row["Note"])
+                ))
         
         if changes:
             db.batch_upsert_order_tracking(changes)
-            st.session_state.edited_rows = {}
-            st.session_state.show_save_button = False
-            
-            # Update the main DataFrame with the changes
-            for order_number, product, received, missing, note in changes:
-                mask = (st.session_state.orders_df["Order Number"] == order_number) & \
-                      (st.session_state.orders_df["Product"] == product)
-                st.session_state.orders_df.loc[mask, "Received"] = received
-                st.session_state.orders_df.loc[mask, "Missing"] = missing
-                st.session_state.orders_df.loc[mask, "Note"] = note
-            
-            st.toast("Changes saved successfully!")
+            st.session_state.last_edited_df = edited_df.copy()
+            st.toast("Changes saved automatically!")
             return True
+    elif st.session_state.last_edited_df is None:
+        st.session_state.last_edited_df = edited_df.copy()
+    
+    st.session_state.last_change_time = current_time
     return False
 
 def apply_filters(df, status_filter, show_preorders_only):
@@ -577,9 +568,10 @@ def check_token_validity(db):
 def update_orders_df(original_df, edited_df):
     """Update the main orders DataFrame with edited changes"""
     update_cols = ["Received", "Missing", "Note"]
-    return original_df.set_index(['Order Number', 'Product']).combine_first(
-        edited_df.set_index(['Order Number', 'Product'])[update_cols]
-    ).reset_index()
+    original_df = original_df.set_index(['Order Number', 'Product'])
+    edited_df = edited_df.set_index(['Order Number', 'Product'])[update_cols]
+    original_df.update(edited_df)  # This overwrites existing values
+    return original_df.reset_index()
 
 def main():
     st.set_page_config(page_title="Shopee Order Management", layout="wide")
@@ -695,19 +687,28 @@ def main():
             )
         }
 
-        # Use data_editor with automatic saving
         edited_df = st.data_editor(
-            st.session_state.orders_df,
+            filtered_df,
             column_config=column_config,
             use_container_width=True,
             key="orders_editor",
             num_rows="fixed",
-            height=600,
-            on_change=lambda: handle_data_editor_changes(
-                st.session_state.get("orders_editor")["edited_rows"], 
-                db
-            )
+            height=600
         )
+
+        # Handle changes with debouncing
+        if not st.session_state.last_edited_df.equals(edited_df):
+            st.session_state.pending_changes = True
+            st.session_state.last_change_time = time.time()
+
+        if st.session_state.pending_changes:
+            if handle_data_editor_changes(edited_df, db):
+                st.session_state.orders_df = update_orders_df(
+                    st.session_state.orders_df,
+                    edited_df
+                )
+                st.session_state.pending_changes = False
+                st.experimental_rerun()
 
         # Statistics and Metrics
         if st.session_state.get('show_stats', False):
