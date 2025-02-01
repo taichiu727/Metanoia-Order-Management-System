@@ -161,25 +161,25 @@ class OrderDatabase:
         finally:
             self.close()
     def batch_upsert_order_tracking(self, records):
-    try:
-        self.connect()
-        # Add transaction management
-        with self.conn:
-            self.cursor.executemany("""
-                INSERT INTO order_tracking (order_sn, product_name, received, missing_count, note, last_updated)
-                VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                ON CONFLICT (order_sn, product_name) 
-                DO UPDATE SET 
-                    received = EXCLUDED.received,
-                    missing_count = EXCLUDED.missing_count,
-                    note = EXCLUDED.note,
-                    last_updated = CURRENT_TIMESTAMP
-            """, records)
-    except psycopg2.Error as e:
-        st.error(f"Database error: {str(e)}")
-        raise
-    finally:
-        self.close()
+        try:
+            self.connect()
+            # Add transaction management
+            with self.conn:
+                self.cursor.executemany("""
+                    INSERT INTO order_tracking (order_sn, product_name, received, missing_count, note, last_updated)
+                    VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (order_sn, product_name) 
+                    DO UPDATE SET 
+                        received = EXCLUDED.received,
+                        missing_count = EXCLUDED.missing_count,
+                        note = EXCLUDED.note,
+                        last_updated = CURRENT_TIMESTAMP
+                """, records)
+        except psycopg2.Error as e:
+            st.error(f"Database error: {str(e)}")
+            raise
+        finally:
+            self.close()
 
 
 
