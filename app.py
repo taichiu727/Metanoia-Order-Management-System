@@ -554,11 +554,18 @@ def check_token_validity(db):
     return token
 
 def update_orders_df(original_df, edited_df):
-    """Update the main orders DataFrame with edited changes"""
+    """Update the main orders DataFrame with edited changes while preserving column order"""
+    # Store original column order
+    column_order = original_df.columns.tolist()
+    
+    # Perform update
     update_cols = ["Received", "Missing", "Note"]
-    return original_df.set_index(['Order Number', 'Product']).combine_first(
+    updated_df = original_df.set_index(['Order Number', 'Product']).combine_first(
         edited_df.set_index(['Order Number', 'Product'])[update_cols]
     ).reset_index()
+    
+    # Reorder columns to match original order
+    return updated_df[column_order]
 
 def main():
     st.set_page_config(page_title="Shopee Order Management", layout="wide")
