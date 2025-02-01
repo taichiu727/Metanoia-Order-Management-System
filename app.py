@@ -25,21 +25,21 @@ class OrderDatabase:
         self.cursor = None
     
     def get_order_tracking(self):
-    """Fetch all order tracking records from the database"""
-    try:
-        self.connect()
-        self.cursor.execute("""
-            SELECT 
-                order_sn,
-                product_name,
-                received,
-                missing_count,
-                note
-            FROM order_tracking
-        """)
-        return self.cursor.fetchall()
-    finally:
-        self.close()
+        """Fetch all order tracking records from the database"""
+        try:
+            self.connect()
+            self.cursor.execute("""
+                SELECT 
+                    order_sn,
+                    product_name,
+                    received,
+                    missing_count,
+                    note
+                FROM order_tracking
+            """)
+            return self.cursor.fetchall()
+        finally:
+            self.close()
     
     def connect(self):
         try:
