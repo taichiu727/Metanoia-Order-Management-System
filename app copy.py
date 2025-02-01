@@ -24,6 +24,23 @@ class OrderDatabase:
         self.conn = None
         self.cursor = None
     
+    def get_order_tracking(self):
+        """Fetch all order tracking records from the database"""
+        try:
+            self.connect()
+            self.cursor.execute("""
+                SELECT 
+                    order_sn,
+                    product_name,
+                    received,
+                    missing_count,
+                    note
+                FROM order_tracking
+            """)
+            return self.cursor.fetchall()
+        finally:
+            self.close()
+    
     def connect(self):
         try:
             self.conn = psycopg2.connect(DATABASE_URL)
@@ -143,34 +160,30 @@ class OrderDatabase:
             self.conn.commit()
         finally:
             self.close()
-
     def batch_upsert_order_tracking(self, records):
         try:
             self.connect()
-            self.cursor.executemany("""
-                INSERT INTO order_tracking (order_sn, product_name, received, missing_count, note, last_updated)
-                VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                ON CONFLICT (order_sn, product_name) 
-                DO UPDATE SET 
-                    received = EXCLUDED.received,
-                    missing_count = EXCLUDED.missing_count,
-                    note = EXCLUDED.note,
-                    last_updated = CURRENT_TIMESTAMP
-            """, records)
-            self.conn.commit()
+            # Add transaction management
+            with self.conn:
+                self.cursor.executemany("""
+                    INSERT INTO order_tracking (order_sn, product_name, received, missing_count, note, last_updated)
+                    VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (order_sn, product_name) 
+                    DO UPDATE SET 
+                        received = EXCLUDED.received,
+                        missing_count = EXCLUDED.missing_count,
+                        note = EXCLUDED.note,
+                        last_updated = CURRENT_TIMESTAMP
+                """, records)
+        except psycopg2.Error as e:
+            st.error(f"Database error: {str(e)}")
+            raise
         finally:
             self.close()
 
-    def get_order_tracking(self):
-        try:
-            self.connect()
-            self.cursor.execute("""
-                SELECT order_sn, product_name, received, missing_count, note
-                FROM order_tracking
-            """)
-            return self.cursor.fetchall()
-        finally:
-            self.close()
+
+
+
 
 def generate_api_signature(api_type, partner_id, path, timestamp, access_token, shop_id, client_secret):
     """Generate Shopee API signature"""
@@ -368,11 +381,61 @@ def initialize_session_state():
         st.session_state.orders_need_refresh = True
     if "orders_df" not in st.session_state:
         st.session_state.orders_df = pd.DataFrame()
-    if "edited_rows" not in st.session_state:
-        st.session_state.edited_rows = {}
 
-def on_data_change(edited_rows):
-    st.session_state.edited_rows = edited_rows
+
+
+def on_data_change():
+    """Handle changes in the data editor"""
+    if "orders_editor" not in st.session_state:
+        return
+        
+    try:
+        # Get edited data
+        editor_data = st.session_state.orders_editor
+        
+        # Check if we have edited rows
+        if "edited_rows" not in editor_data:
+            return
+            
+        edited_rows = editor_data["edited_rows"]
+        if not edited_rows:
+            return
+            
+        db = OrderDatabase()
+        original_df = st.session_state.orders_df
+        
+        # Process each edited row
+        for row_idx_str, changes in edited_rows.items():
+            row_idx = int(row_idx_str)
+            original_row = original_df.iloc[row_idx]
+            
+            # Get original values
+            order_sn = original_row["Order Number"]
+            product_name = original_row["Product"]
+            
+            # Get updated values, falling back to original if not changed
+            received = changes.get("Received", original_row["Received"])
+            missing = changes.get("Missing", original_row["Missing"])
+            note = changes.get("Note", original_row["Note"])
+            
+            # Save to database
+            db.upsert_order_tracking(
+                order_sn=str(order_sn),
+                product_name=str(product_name),
+                received=bool(received),
+                missing_count=int(missing) if pd.notna(missing) else 0,
+                note=str(note) if pd.notna(note) else ""
+            )
+            
+            # Update the DataFrame in session state
+            st.session_state.orders_df.at[row_idx, "Received"] = received
+            st.session_state.orders_df.at[row_idx, "Missing"] = missing
+            st.session_state.orders_df.at[row_idx, "Note"] = note
+            
+        st.toast("✅ Changes saved!")
+            
+    except Exception as e:
+        st.error(f"Error saving changes: {str(e)}")
 
 
 def handle_authentication():
@@ -681,7 +744,7 @@ def main():
             )
         }
 
- 
+
     
         # Use data editor
         edited_df = st.data_editor(
@@ -691,40 +754,14 @@ def main():
             key="orders_editor",
             num_rows="fixed",
             height=600,
-            on_change=lambda: on_data_change(edited_df.to_dict('records'))
+            disabled=["Order Number", "Created", "Product", "Quantity", "Image", "Item Spec", "Item Number"],
+            on_change=on_data_change
         )
-
-        # Handle changes
-        if st.session_state.edited_rows:
-            current_data = edited_df.to_dict('records')
-            if current_data != st.session_state.edited_rows:
-                changes = []
-                for row in current_data:
-                    old_row = next(
-                        (r for r in st.session_state.edited_rows 
-                         if r["Order Number"] == row["Order Number"] 
-                         and r["Product"] == row["Product"]), 
-                        None
-                    )
-                    if old_row and (
-                        row["Received"] != old_row["Received"] or
-                        row["Missing"] != old_row["Missing"] or
-                        row["Note"] != old_row["Note"]
-                    ):
-                        changes.append((
-                            str(row["Order Number"]),
-                            str(row["Product"]),
-                            bool(row["Received"]),
-                            int(row["Missing"]),
-                            str(row["Note"])
-                        ))
-                
-                if changes:
-                    db.batch_upsert_order_tracking(changes)
-                    st.session_state.orders_df = update_orders_df(st.session_state.orders_df, edited_df)
-                    st.session_state.edited_rows = current_data
-                    st.toast("Changes saved!")
-
+        # Update main DataFrame if needed
+        if "orders_df" in st.session_state and edited_df is not None:
+            st.session_state.orders_df = edited_df.copy()
+          
+        
         # Statistics and Metrics
         if st.session_state.get('show_stats', False):
             st.subheader("📊 Order Statistics")
@@ -781,6 +818,23 @@ def main():
                 st.success("Data copied to clipboard!")
     else:
         st.info("No orders found in the selected time range.")
+
+def update_orders_df(original_df, edited_df):
+    """Update the main orders DataFrame with edited changes"""
+    if edited_df is None or original_df is None:
+        return original_df
+        
+    # Create copies to avoid modifying the original DataFrames
+    original_copy = original_df.copy()
+    edited_copy = edited_df.copy()
+    
+    # Update only the editable columns
+    editable_cols = ["Received", "Missing", "Note"]
+    for col in editable_cols:
+        if col in edited_copy.columns:
+            original_copy.loc[:, col] = edited_copy[col]
+    
+    return original_copy
 
 if __name__ == "__main__":
     main()

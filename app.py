@@ -526,21 +526,36 @@ def fetch_and_process_orders(token, db):
         return pd.DataFrame(orders_data)
 
 def handle_data_editor_changes(edited_df, db):
-    """Handle changes made in the data editor"""
-    if st.session_state.last_edited_df is not None:
-        changes = []
-        for idx, row in edited_df.iterrows():
-            last_row = st.session_state.last_edited_df.iloc[idx]
-            if (row[["Received", "Missing", "Note"]] != last_row[["Received", "Missing", "Note"]]).any():
-                changes.append((str(row["Order Number"]), str(row["Product"]), bool(row["Received"]), int(row["Missing"]), str(row["Note"])))
-        
-        if changes:
-            db.batch_upsert_order_tracking(changes)
-            st.session_state.orders_df = update_orders_df(st.session_state.orders_df, edited_df)
-            st.session_state.last_edited_df = edited_df.copy()
-            st.toast("Changes saved!")
-    else:
-        st.session_state.last_edited_df = edited_df.copy()
+    """Handle batch changes made in the data editor"""
+    if edited_df is not None and not edited_df.empty:
+        try:
+            original_df = st.session_state.orders_df
+            changes = []
+            
+            # Compare edited_df with original_df to find changes
+            for idx in range(len(edited_df)):
+                edited_row = edited_df.iloc[idx]
+                original_row = original_df.iloc[idx]
+                
+                if not edited_row.equals(original_row):
+                    changes.append((
+                        str(edited_row["Order Number"]),
+                        str(edited_row["Product"]),
+                        bool(edited_row["Received"]),
+                        int(edited_row["Missing"]) if pd.notna(edited_row["Missing"]) else 0,
+                        str(edited_row["Note"]) if pd.notna(edited_row["Note"]) else ""
+                    ))
+            
+            if changes:
+                db.batch_upsert_order_tracking(changes)
+                st.session_state.orders_df = update_orders_df(st.session_state.orders_df, edited_df)
+                st.toast(f"✅ Successfully saved {len(changes)} changes!")
+            else:
+                st.toast("⚠️ No changes detected")
+                
+        except Exception as e:
+            st.error(f"Error saving changes: {str(e)}")
+            raise e
 
 def apply_filters(df, status_filter, show_preorders_only):
     """Apply filters to the DataFrame"""
@@ -747,16 +762,24 @@ def main():
 
     
         # Use data editor
-        edited_df = st.data_editor(
-            filtered_df,
-            column_config=column_config,
-            use_container_width=True,
-            key="orders_editor",
-            num_rows="fixed",
-            height=600,
-            disabled=["Order Number", "Created", "Product", "Quantity", "Image", "Item Spec", "Item Number"],
-            on_change=on_data_change
-        )
+        with st.form(key='order_tracking_form'):
+        # Display the data editor
+            edited_df = st.data_editor(
+                filtered_df,
+                column_config=column_config,
+                use_container_width=True,
+                key="orders_editor",
+                num_rows="fixed",
+                height=600,
+                disabled=["Order Number", "Created", "Product", "Quantity", "Image", "Item Spec", "Item Number"]
+            )
+            
+            # Add a submit button for the form
+            submitted = st.form_submit_button("💾 Save All Changes")
+            
+            # Handle form submission
+            if submitted:
+                handle_data_editor_changes(edited_df, db)
         # Update main DataFrame if needed
         if "orders_df" in st.session_state and edited_df is not None:
             st.session_state.orders_df = edited_df.copy()
