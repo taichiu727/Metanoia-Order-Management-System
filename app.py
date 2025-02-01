@@ -381,6 +381,8 @@ def initialize_session_state():
         st.session_state.orders_need_refresh = True
     if "orders_df" not in st.session_state:
         st.session_state.orders_df = pd.DataFrame()
+    if "editor_state" not in st.session_state:
+        st.session_state.editor_state = {}
 
 
 
@@ -390,6 +392,10 @@ def on_data_change():
         return
         
     try:
+        # Store current editor state
+        if "data_editor_rows" in st.session_state:
+            st.session_state.editor_state = st.session_state.data_editor_rows
+        
         # Get edited data
         editor_data = st.session_state.orders_editor
         
@@ -755,7 +761,8 @@ def main():
             num_rows="fixed",
             height=600,
             disabled=["Order Number", "Created", "Product", "Quantity", "Image", "Item Spec", "Item Number"],
-            on_change=on_data_change
+            on_change=on_data_change,
+            editor_state=st.session_state.editor_state
         )
         # Update main DataFrame if needed
         if "orders_df" in st.session_state and edited_df is not None:
