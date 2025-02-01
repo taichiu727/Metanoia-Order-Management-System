@@ -475,10 +475,10 @@ def handle_data_editor_changes(edited_df, db):
                 ))
         
         if changes:
-                db.batch_upsert_order_tracking(changes)
-                st.session_state.last_edited_df = edited_df.copy()
-                st.toast("Changes saved automatically!")
-                return True
+            db.batch_upsert_order_tracking(changes)
+            st.session_state.last_edited_df = edited_df.copy()
+            st.toast("Changes saved automatically!")
+            return True
     else:
         st.session_state.last_edited_df = edited_df.copy()
     return False
