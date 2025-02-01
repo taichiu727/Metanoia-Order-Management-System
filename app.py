@@ -127,10 +127,22 @@ class OrderDatabase:
         finally:
             self.close()
 
-    def upsert_order_tracking(self, order_sn, product_name, received, missing_count, note):
+    def batch_upsert_order_tracking(self, records):
         try:
             self.connect()
-            self.cursor.execute("""
+            # Convert boolean values explicitly
+            processed_records = [
+                (
+                    str(record[0]),  # order_sn
+                    str(record[1]),  # product_name
+                    bool(record[2]),  # received - explicit boolean conversion
+                    int(record[3]),  # missing_count
+                    str(record[4])   # note
+                )
+                for record in records
+            ]
+            
+            self.cursor.executemany("""
                 INSERT INTO order_tracking (order_sn, product_name, received, missing_count, note, last_updated)
                 VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                 ON CONFLICT (order_sn, product_name) 
@@ -139,7 +151,7 @@ class OrderDatabase:
                     missing_count = EXCLUDED.missing_count,
                     note = EXCLUDED.note,
                     last_updated = CURRENT_TIMESTAMP
-            """, (order_sn, product_name, received, missing_count, note))
+            """, processed_records)
             self.conn.commit()
         finally:
             self.close()
@@ -460,27 +472,43 @@ def fetch_and_process_orders(token, db):
         return pd.DataFrame(orders_data)
 
 def handle_data_editor_changes(edited_df, db):
-    """Handle changes made in the data editor"""
+    """Handle changes made in the data editor with improved change detection"""
     if st.session_state.last_edited_df is not None:
         changes = []
-        for idx, row in edited_df.iterrows():
-            last_row = st.session_state.last_edited_df.iloc[idx]
-            if (row[["Received", "Missing", "Note"]] != last_row[["Received", "Missing", "Note"]]).any():
+        
+        # Convert DataFrames to dictionaries for easier comparison
+        current_state = edited_df.set_index(['Order Number', 'Product']).to_dict('index')
+        previous_state = st.session_state.last_edited_df.set_index(['Order Number', 'Product']).to_dict('index')
+        
+        # Compare current and previous states
+        for (order_number, product), current_row in current_state.items():
+            previous_row = previous_state.get((order_number, product), {})
+            
+            # Check if any of the editable fields have changed
+            if (
+                current_row.get('Received') != previous_row.get('Received') or
+                current_row.get('Missing') != previous_row.get('Missing') or
+                current_row.get('Note') != previous_row.get('Note')
+            ):
                 changes.append((
-                    str(row["Order Number"]),
-                    str(row["Product"]),
-                    bool(row["Received"]),
-                    int(row["Missing"]),
-                    str(row["Note"])
+                    str(order_number),
+                    str(product),
+                    bool(current_row['Received']),  # Explicit boolean conversion
+                    int(current_row['Missing']),
+                    str(current_row['Note'])
                 ))
         
         if changes:
-            db.batch_upsert_order_tracking(changes)
-            st.session_state.last_edited_df = edited_df.copy()
-            st.toast("Changes saved automatically!")
-            return True
-    else:
-        st.session_state.last_edited_df = edited_df.copy()
+            try:
+                db.batch_upsert_order_tracking(changes)
+                st.session_state.last_edited_df = edited_df.copy()
+                st.toast("Changes saved successfully!")
+                return True
+            except Exception as e:
+                st.error(f"Error saving changes: {str(e)}")
+                return False
+    
+    st.session_state.last_edited_df = edited_df.copy()
     return False
 
 def apply_filters(df, status_filter, show_preorders_only):
@@ -618,59 +646,7 @@ def main():
         st.session_state.orders_need_refresh = False
 
     if not st.session_state.orders_df.empty:
-        # Apply filters if any
-        filtered_df = apply_filters(st.session_state.orders_df, status_filter, show_preorders_only)
-        
-        # Configure editable columns
-        column_config = {
-            "Order Number": st.column_config.TextColumn(
-                "Order Number",
-                width="small",
-                help="Shopee order number"
-            ),
-            "Created": st.column_config.TextColumn(
-                "Created",
-                width="small",
-                help="Order creation date and time"
-            ),
-            "Product": st.column_config.TextColumn(
-                "Product",
-                width="small",
-                help="Product name"
-            ),
-            "Quantity": st.column_config.NumberColumn(
-                "Quantity",
-                width="small",
-                help="Ordered quantity"
-            ),
-            "Image": st.column_config.ImageColumn(
-                "Image",
-                width="small",
-                help="Product image"
-            ),
-            "Item Number": st.column_config.TextColumn(
-                "Item Number",
-                width="small",
-                help="Item Number"
-            ),
-            "Received": st.column_config.CheckboxColumn(
-                "Received",
-                width="small",
-                help="Mark if item has been received"
-            ),
-            "Missing": st.column_config.NumberColumn(
-                "Missing",
-                width="small",
-                help="Number of missing items"
-            ),
-            "Note": st.column_config.TextColumn(
-                "Note",
-                width="medium",
-                help="Additional notes"
-            )
-        }
-
-        # Use data_editor with automatic saving
+        # Configure the data editor with explicit onChange handling
         edited_df = st.data_editor(
             filtered_df,
             column_config=column_config,
@@ -678,13 +654,15 @@ def main():
             key="orders_editor",
             num_rows="fixed",
             height=600,
+            disabled=False,  # Ensure editing is enabled
             on_change=lambda: setattr(st.session_state, 'pending_changes', True)
         )
 
-        # Handle changes automatically when detected
+        # Handle changes when detected
         if st.session_state.pending_changes:
             if handle_data_editor_changes(edited_df, db):
                 st.session_state.pending_changes = False
+                st.experimental_rerun()
 
         # Statistics and Metrics
         if st.session_state.get('show_stats', False):
