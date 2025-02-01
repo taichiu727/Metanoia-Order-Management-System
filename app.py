@@ -4,8 +4,7 @@ import pandas as pd
 from shopee_oauth import (
     get_auth_url, 
     fetch_token, 
-    save_token, 
-    load_token,
+    refresh_token,
     CLIENT_ID,
     CLIENT_SECRET,
     SHOP_ID,
@@ -353,6 +352,15 @@ def initialize_session_state():
     """Initialize all session state variables"""
     if "authentication_state" not in st.session_state:
         st.session_state.authentication_state = "initial"
+        # Check for existing valid token
+        db = OrderDatabase()
+        token = db.load_token()
+        if token:
+            current_time = int(time.time())
+            token_age = current_time - token["fetch_time"]
+            if token_age < (token["expire_in"] - 300):  # Token is still valid
+                st.session_state.authentication_state = "complete"
+    
     if "orders" not in st.session_state:
         st.session_state.orders = []
     if "order_details" not in st.session_state:
@@ -365,6 +373,7 @@ def initialize_session_state():
         st.session_state.last_edited_df = None
     if "pending_changes" not in st.session_state:
         st.session_state.pending_changes = False
+
 
 def handle_authentication():
     """Handle the Shopee authentication flow"""
@@ -489,6 +498,12 @@ def apply_filters(df, status_filter, show_preorders_only):
 
 def handle_authentication(db):
     """Handle the Shopee authentication flow using database storage"""
+    # First check if there's a valid token in the database
+    token = check_token_validity(db)
+    if token:
+        st.session_state.authentication_state = "complete"
+        return True
+        
     if st.session_state.authentication_state != "complete":
         st.info("Please authenticate with your Shopee account to continue.")
         auth_url = get_auth_url()
@@ -508,11 +523,12 @@ def handle_authentication(db):
                 except Exception as e:
                     st.error(f"Authentication failed: {str(e)}")
                     db.clear_token()
+                    return False
         return False
     return True
 
 def check_token_validity(db):
-    """Check if the stored token is valid"""
+    """Check if the stored token is valid and refresh if needed"""
     token = db.load_token()
     if not token:
         return None
@@ -523,11 +539,20 @@ def check_token_validity(db):
     # If token is expired or close to expiring, try to refresh it
     if token_age > (token["expire_in"] - 300):  # Refresh if less than 5 minutes remaining
         try:
-            new_token = refresh_access_token(token["refresh_token"])
-            new_token["fetch_time"] = current_time
-            db.save_token(new_token)
-            return new_token
-        except Exception:
+            new_token_data = refresh_token(token["refresh_token"])
+            if new_token_data:
+                new_token = {
+                    "access_token": new_token_data["access_token"],
+                    "refresh_token": new_token_data["refresh_token"],
+                    "expire_in": new_token_data["expire_in"],
+                    "fetch_time": current_time,
+                    "shop_id": SHOP_ID,
+                    "merchant_id": new_token_data.get("merchant_id")
+                }
+                db.save_token(new_token)
+                return new_token
+        except Exception as e:
+            st.error(f"Failed to refresh token: {str(e)}")
             db.clear_token()
             return None
     
