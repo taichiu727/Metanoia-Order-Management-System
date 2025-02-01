@@ -565,8 +565,6 @@ def main():
     db.init_tables()
     initialize_session_state()
 
-   
-    
     # Sidebar controls
     with st.sidebar:
         st.header("Controls")
@@ -576,7 +574,7 @@ def main():
                 st.session_state.order_details = []
                 st.session_state.orders_df = pd.DataFrame()
                 st.session_state.last_edited_df = None
-                st.rerun()
+                st.experimental_rerun()
             
             st.divider()
             st.subheader("Filters")
@@ -594,7 +592,7 @@ def main():
             if st.button("🚪 Logout"):
                 clear_token()
                 st.session_state.clear()
-                st.rerun()
+                st.experimental_rerun()
 
     # Main content
     st.title("📦 Shopee Order Management")
@@ -608,7 +606,7 @@ def main():
     if not token:
         st.error("Token not found or invalid")
         st.session_state.authentication_state = "initial"
-        st.rerun()
+        st.experimental_rerun()
 
     # Fetch and display orders
     if st.session_state.orders_need_refresh:
