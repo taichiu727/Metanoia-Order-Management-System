@@ -381,61 +381,59 @@ def initialize_session_state():
         st.session_state.orders_need_refresh = True
     if "orders_df" not in st.session_state:
         st.session_state.orders_df = pd.DataFrame()
+    if "pending_changes" not in st.session_state:
+        st.session_state.pending_changes = {}
 
-
-
-def on_data_change():
-    """Handle changes in the data editor"""
-    if "orders_editor" not in st.session_state:
+def save_changes():
+    """Save pending changes to the database"""
+    if not st.session_state.pending_changes:
         return
         
     try:
-        # Get edited data
-        editor_data = st.session_state.orders_editor
-        
-        # Check if we have edited rows
-        if "edited_rows" not in editor_data:
-            return
-            
-        edited_rows = editor_data["edited_rows"]
-        if not edited_rows:
-            return
-            
         db = OrderDatabase()
         original_df = st.session_state.orders_df
         
-        # Process each edited row
-        for row_idx_str, changes in edited_rows.items():
+        changes = []
+        for row_idx_str, change_data in st.session_state.pending_changes.items():
             row_idx = int(row_idx_str)
             original_row = original_df.iloc[row_idx]
             
-            # Get original values
-            order_sn = original_row["Order Number"]
-            product_name = original_row["Product"]
+            changes.append((
+                str(original_row["Order Number"]),
+                str(original_row["Product"]),
+                bool(change_data.get("Received", original_row["Received"])),
+                int(change_data.get("Missing", original_row["Missing"])) if pd.notna(change_data.get("Missing", original_row["Missing"])) else 0,
+                str(change_data.get("Note", original_row["Note"])) if pd.notna(change_data.get("Note", original_row["Note"])) else ""
+            ))
+        
+        if changes:
+            db.batch_upsert_order_tracking(changes)
+            st.toast("✅ Changes saved!")
             
-            # Get updated values, falling back to original if not changed
-            received = changes.get("Received", original_row["Received"])
-            missing = changes.get("Missing", original_row["Missing"])
-            note = changes.get("Note", original_row["Note"])
+            # Update the DataFrame
+            for row_idx_str, change_data in st.session_state.pending_changes.items():
+                row_idx = int(row_idx_str)
+                for field, value in change_data.items():
+                    st.session_state.orders_df.at[row_idx, field] = value
             
-            # Save to database
-            db.upsert_order_tracking(
-                order_sn=str(order_sn),
-                product_name=str(product_name),
-                received=bool(received),
-                missing_count=int(missing) if pd.notna(missing) else 0,
-                note=str(note) if pd.notna(note) else ""
-            )
-            
-            # Update the DataFrame in session state
-            st.session_state.orders_df.at[row_idx, "Received"] = received
-            st.session_state.orders_df.at[row_idx, "Missing"] = missing
-            st.session_state.orders_df.at[row_idx, "Note"] = note
-            
-        st.toast("✅ Changes saved!")
+            # Clear pending changes
+            st.session_state.pending_changes = {}
             
     except Exception as e:
         st.error(f"Error saving changes: {str(e)}")
+
+def on_edit():
+    """Handle edit changes and store them temporarily"""
+    if "orders_editor" not in st.session_state:
+        return
+        
+    editor_data = st.session_state.orders_editor
+    if "edited_rows" in editor_data:
+        # Merge new changes with pending changes
+        for row_idx, changes in editor_data["edited_rows"].items():
+            if row_idx not in st.session_state.pending_changes:
+                st.session_state.pending_changes[row_idx] = {}
+            st.session_state.pending_changes[row_idx].update(changes)
 
 
 def handle_authentication():
@@ -747,16 +745,28 @@ def main():
 
     
         # Use data editor
-        edited_df = st.data_editor(
-            filtered_df,
-            column_config=column_config,
-            use_container_width=True,
-            key="orders_editor",
-            num_rows="fixed",
-            height=600,
-            disabled=["Order Number", "Created", "Product", "Quantity", "Image", "Item Spec", "Item Number"],
-            on_change=on_data_change
-        )
+        with st.form(key="editor_form"):
+            # Use data editor inside the form
+            edited_df = st.data_editor(
+                filtered_df,
+                column_config=column_config,
+                use_container_width=True,
+                key="orders_editor",
+                num_rows="fixed",
+                height=600,
+                disabled=["Order Number", "Created", "Product", "Quantity", "Image", "Item Spec", "Item Number"],
+                on_change=on_edit
+            )
+            
+            # Show pending changes count if any
+            if st.session_state.pending_changes:
+                st.info(f"You have {len(st.session_state.pending_changes)} unsaved changes")
+            
+            # Add a submit button
+            submit_button = st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True)
+            
+            if submit_button:
+                save_changes()
         # Update main DataFrame if needed
         if "orders_df" in st.session_state and edited_df is not None:
             st.session_state.orders_df = edited_df.copy()
