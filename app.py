@@ -565,6 +565,8 @@ def main():
     db.init_tables()
     initialize_session_state()
 
+    status_filter = "ALL"
+    show_preorders_only = False
    
     
     # Sidebar controls
