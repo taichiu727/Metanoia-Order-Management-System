@@ -462,34 +462,20 @@ def fetch_and_process_orders(token, db):
         return pd.DataFrame(orders_data)
 
 def handle_data_editor_changes(edited_df, db):
-    """Handle changes made in the data editor with debouncing"""
-    current_time = time.time()
-    last_change_time = st.session_state.get('last_change_time', 0)
-    
-    # Check if changes exist and debounce period (1 second) has passed
-    if st.session_state.last_edited_df is not None and (current_time - last_change_time) > 1:
+    """Handle changes made in the data editor"""
+    if st.session_state.last_edited_df is not None:
         changes = []
         for idx, row in edited_df.iterrows():
             last_row = st.session_state.last_edited_df.iloc[idx]
             if (row[["Received", "Missing", "Note"]] != last_row[["Received", "Missing", "Note"]]).any():
-                changes.append((
-                    str(row["Order Number"]), 
-                    str(row["Product"]), 
-                    bool(row["Received"]), 
-                    int(row["Missing"]), 
-                    str(row["Note"])
-                ))
+                changes.append((str(row["Order Number"]), str(row["Product"]), bool(row["Received"]), int(row["Missing"]), str(row["Note"])))
         
         if changes:
             db.batch_upsert_order_tracking(changes)
             st.session_state.last_edited_df = edited_df.copy()
             st.toast("Changes saved automatically!")
-            return True
-    elif st.session_state.last_edited_df is None:
+    else:
         st.session_state.last_edited_df = edited_df.copy()
-    
-    st.session_state.last_change_time = current_time
-    return False
 
 def apply_filters(df, status_filter, show_preorders_only):
     """Apply filters to the DataFrame"""
@@ -568,10 +554,9 @@ def check_token_validity(db):
 def update_orders_df(original_df, edited_df):
     """Update the main orders DataFrame with edited changes"""
     update_cols = ["Received", "Missing", "Note"]
-    original_df = original_df.set_index(['Order Number', 'Product'])
-    edited_df = edited_df.set_index(['Order Number', 'Product'])[update_cols]
-    original_df.update(edited_df)  # This overwrites existing values
-    return original_df.reset_index()
+    return original_df.set_index(['Order Number', 'Product']).combine_first(
+        edited_df.set_index(['Order Number', 'Product'])[update_cols]
+    ).reset_index()
 
 def main():
     st.set_page_config(page_title="Shopee Order Management", layout="wide")
@@ -580,9 +565,6 @@ def main():
     db = OrderDatabase()
     db.init_tables()
     initialize_session_state()
-
-    if st.session_state.last_edited_df is None:
-        st.session_state.last_edited_df = pd.DataFrame()
 
     # Sidebar controls
     with st.sidebar:
@@ -690,6 +672,7 @@ def main():
             )
         }
 
+        # Use data_editor with automatic saving
         edited_df = st.data_editor(
             filtered_df,
             column_config=column_config,
@@ -699,19 +682,15 @@ def main():
             height=600
         )
 
-        # Handle changes with debouncing
-        if not st.session_state.last_edited_df.equals(edited_df):
-            st.session_state.pending_changes = True
-            st.session_state.last_change_time = time.time()
-
-        if st.session_state.pending_changes:
-            if handle_data_editor_changes(edited_df, db):
-                st.session_state.orders_df = update_orders_df(
-                    st.session_state.orders_df,
-                    edited_df
-                )
-                st.session_state.pending_changes = False
-                st.experimental_rerun()
+        # Handle changes automatically when detected
+        if "orders_editor" in st.session_state:
+            handle_data_editor_changes(edited_df, db)
+            
+            # Update the main DataFrame with the changes
+            st.session_state.orders_df = update_orders_df(
+                st.session_state.orders_df,
+                edited_df
+            )
 
         # Statistics and Metrics
         if st.session_state.get('show_stats', False):
