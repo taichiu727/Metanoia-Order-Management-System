@@ -392,7 +392,7 @@ def handle_authentication():
                     st.rerun()
                 except Exception as e:
                     st.error(f"Authentication failed: {str(e)}")
-                    clear_token()
+                   
         return False
     return True
 
@@ -514,7 +514,7 @@ def handle_authentication(db):
                     db.save_token(token)
                     st.session_state.authentication_state = "complete"
                     st.query_params.clear()
-                    st.rerun()
+                    #st.rerun()
                 except Exception as e:
                     st.error(f"Authentication failed: {str(e)}")
                     db.clear_token()
@@ -609,7 +609,7 @@ def main():
     if not token:
         st.error("Token not found or invalid")
         st.session_state.authentication_state = "initial"
-        st.experimental_rerun()
+        #st.experimental_rerun()
 
     # Fetch and display orders
     if st.session_state.orders_need_refresh:
