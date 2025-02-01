@@ -21,6 +21,32 @@ from psycopg2.extras import RealDictCursor
 # Database Configuration
 DATABASE_URL = "postgresql://neondb_owner:npg_r9iSFwQd4zAT@ep-white-sky-a1mrgmyd-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require"
 
+def handle_authentication():
+    """Handle the Shopee authentication flow"""
+    # Only allow admin to authenticate
+    if not is_admin():
+        return False
+
+    if st.session_state.authentication_state != "complete":
+        st.info("Please authenticate with your Shopee account to continue.")
+        auth_url = get_auth_url()
+        st.markdown(f"[🔐 Authenticate with Shopee]({auth_url})")
+        
+        if "code" in st.query_params:
+            with st.spinner("Authenticating..."):
+                try:
+                    code = st.query_params["code"]
+                    token = fetch_token(code)
+                    save_token(token)
+                    st.session_state.authentication_state = "complete"
+                    st.query_params.clear()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Authentication failed: {str(e)}")
+                    clear_token()
+        return False
+    return True
+
 class OrderDatabase:
     def __init__(self):
         self.conn = None
@@ -427,31 +453,36 @@ def main():
     # Sidebar controls
     with st.sidebar:
         st.header("Controls")
-        if st.session_state.authentication_state == "complete":
-            if st.button("🔄 Refresh Orders"):
-                st.session_state.orders_need_refresh = True
-                st.session_state.order_details = []
-                st.session_state.orders_df = pd.DataFrame()
-                st.session_state.last_edited_df = None
-                st.rerun()
-            
-            st.divider()
-            st.subheader("Filters")
-            status_filter = st.selectbox(
-                "Order Status",
-                ["All", "UNPAID", "READY_TO_SHIP", "SHIPPED", "COMPLETED", "CANCELLED"]
-            )
-            show_preorders_only = st.checkbox("Show Preorders Only")
-            
-            st.divider()
-            if st.button("📊 View Statistics"):
-                st.session_state.show_stats = not st.session_state.get('show_stats', False)
-            
-            st.divider()
-            if st.button("🚪 Logout"):
-                clear_token()
-                st.session_state.clear()
-                st.rerun()
+        
+        # Admin-specific controls
+        if st.session_state.get('is_admin', False):
+            if st.session_state.authentication_state == "complete":
+                if st.button("🔄 Refresh Orders"):
+                    st.session_state.orders_need_refresh = True
+                    st.session_state.order_details = []
+                    st.session_state.orders_df = pd.DataFrame()
+                    st.session_state.last_edited_df = None
+                    st.rerun()
+                
+                st.divider()
+                st.subheader("Filters")
+                status_filter = st.selectbox(
+                    "Order Status",
+                    ["All", "UNPAID", "READY_TO_SHIP", "SHIPPED", "COMPLETED", "CANCELLED"]
+                )
+                show_preorders_only = st.checkbox("Show Preorders Only")
+                
+                st.divider()
+                if st.button("📊 View Statistics"):
+                    st.session_state.show_stats = not st.session_state.get('show_stats', False)
+                
+                st.divider()
+                if st.button("🚪 Logout"):
+                    clear_token()
+                    st.session_state.clear()
+                    st.rerun()
+            else:
+                st.info("Authenticate with Shopee to manage orders")
 
     # Main content
     st.title("📦 Shopee Order Management")
@@ -460,6 +491,7 @@ def main():
     if not handle_authentication():
         return
 
+    # Verify token and admin status
     token = load_token()
     if not token or "access_token" not in token:
         st.error("Token not found or invalid")
