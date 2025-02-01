@@ -381,45 +381,39 @@ def initialize_session_state():
         st.session_state.orders_need_refresh = True
     if "orders_df" not in st.session_state:
         st.session_state.orders_df = pd.DataFrame()
-    if "last_save_time" not in st.session_state:
-        st.session_state.last_save_time = time.time()
-    if "pending_changes" not in st.session_state:
-        st.session_state.pending_changes = {}
 
 
 
 def on_data_change():
-    """Handle changes in the data editor with 10-second debouncing"""
-    current_time = time.time()
-    
-    # Store the changes
-    if "orders_editor" in st.session_state and "edited_rows" in st.session_state.orders_editor:
-        st.session_state.pending_changes = st.session_state.orders_editor["edited_rows"]
-        
-        # Only save if 10 seconds have passed since the last change
-        if current_time - st.session_state.last_save_time >= 10:
-            save_pending_changes()
-            st.session_state.last_save_time = current_time
-
-def save_pending_changes():
-    """Save any pending changes to the database"""
-    if not st.session_state.pending_changes:
+    """Handle changes in the data editor"""
+    if "orders_editor" not in st.session_state:
         return
         
     try:
+        # Get edited data
+        editor_data = st.session_state.orders_editor
+        
+        # Check if we have edited rows
+        if "edited_rows" not in editor_data:
+            return
+            
+        edited_rows = editor_data["edited_rows"]
+        if not edited_rows:
+            return
+            
         db = OrderDatabase()
         original_df = st.session_state.orders_df
-        edited_rows = st.session_state.pending_changes
         
+        # Process each edited row
         for row_idx_str, changes in edited_rows.items():
-            if not changes:
-                continue
-                
             row_idx = int(row_idx_str)
             original_row = original_df.iloc[row_idx]
             
+            # Get original values
             order_sn = original_row["Order Number"]
             product_name = original_row["Product"]
+            
+            # Get updated values, falling back to original if not changed
             received = changes.get("Received", original_row["Received"])
             missing = changes.get("Missing", original_row["Missing"])
             note = changes.get("Note", original_row["Note"])
@@ -433,14 +427,12 @@ def save_pending_changes():
                 note=str(note) if pd.notna(note) else ""
             )
             
-            # Update DataFrame
-            original_df.at[row_idx, "Received"] = received
-            original_df.at[row_idx, "Missing"] = missing
-            original_df.at[row_idx, "Note"] = note
+            # Update the DataFrame in session state
+            st.session_state.orders_df.at[row_idx, "Received"] = received
+            st.session_state.orders_df.at[row_idx, "Missing"] = missing
+            st.session_state.orders_df.at[row_idx, "Note"] = note
             
-        # Clear pending changes
-        st.session_state.pending_changes = {}
-        st.toast("✅ Changes saved!", icon="✅")
+        st.toast("✅ Changes saved!")
             
     except Exception as e:
         st.error(f"Error saving changes: {str(e)}")
@@ -754,18 +746,6 @@ def main():
 
 
     
-        current_time = time.time()
-        time_since_last_save = current_time - st.session_state.last_save_time
-        
-        if st.session_state.pending_changes:
-            save_in = max(0, 10 - time_since_last_save)
-            st.info(f"Changes will be saved in {int(save_in)} seconds...")
-            
-            # Check if it's time to save
-            if time_since_last_save >= 10:
-                save_pending_changes()
-                st.session_state.last_save_time = current_time
-        
         # Use data editor
         edited_df = st.data_editor(
             filtered_df,
