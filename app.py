@@ -130,29 +130,39 @@ class OrderDatabase:
     def batch_upsert_order_tracking(self, records):
         try:
             self.connect()
-            # Convert boolean values explicitly
+            # Ensure all records are properly formatted with explicit type conversion
             processed_records = [
                 (
                     str(record[0]),  # order_sn
                     str(record[1]),  # product_name
-                    bool(record[2]),  # received - explicit boolean conversion
+                    bool(record[2]),  # received
                     int(record[3]),  # missing_count
-                    str(record[4])   # note
+                    str(record[4] or '')  # note - handle None values
                 )
                 for record in records
             ]
             
+            # Use a more robust upsert query
             self.cursor.executemany("""
-                INSERT INTO order_tracking (order_sn, product_name, received, missing_count, note, last_updated)
-                VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                INSERT INTO order_tracking 
+                    (order_sn, product_name, received, missing_count, note, last_updated)
+                VALUES 
+                    (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                 ON CONFLICT (order_sn, product_name) 
                 DO UPDATE SET 
                     received = EXCLUDED.received,
                     missing_count = EXCLUDED.missing_count,
                     note = EXCLUDED.note,
                     last_updated = CURRENT_TIMESTAMP
+                WHERE 
+                    order_tracking.received IS DISTINCT FROM EXCLUDED.received OR
+                    order_tracking.missing_count IS DISTINCT FROM EXCLUDED.missing_count OR
+                    order_tracking.note IS DISTINCT FROM EXCLUDED.note
             """, processed_records)
             self.conn.commit()
+        except Exception as e:
+            self.conn.rollback()
+            raise e
         finally:
             self.close()
 
@@ -177,7 +187,12 @@ class OrderDatabase:
         try:
             self.connect()
             self.cursor.execute("""
-                SELECT order_sn, product_name, received, missing_count, note
+                SELECT 
+                    order_sn, 
+                    product_name, 
+                    COALESCE(received, false) as received,
+                    COALESCE(missing_count, 0) as missing_count,
+                    COALESCE(note, '') as note
                 FROM order_tracking
             """)
             return self.cursor.fetchall()
@@ -443,9 +458,13 @@ def fetch_and_process_orders(token, db):
         order_details_list.sort(key=lambda x: x['create_time'], reverse=True)
         st.session_state.order_details = order_details_list
 
-        # Process orders into DataFrame
+        # Fetch existing tracking data
         tracking_data = {
-            (item['order_sn'], item['product_name']): item 
+            (str(item['order_sn']), str(item['product_name'])): {
+                'received': bool(item['received']),
+                'missing_count': int(item['missing_count']),
+                'note': str(item['note'] or '')
+            }
             for item in db.get_order_tracking()
         }
         
@@ -453,20 +472,22 @@ def fetch_and_process_orders(token, db):
         for order_detail in st.session_state.order_details:
             if "item_list" in order_detail:
                 for item in order_detail["item_list"]:
+                    # Get tracking data or default values
                     tracking = tracking_data.get(
-                        (order_detail["order_sn"], item["item_name"]), 
+                        (str(order_detail["order_sn"]), str(item["item_name"])),
                         {'received': False, 'missing_count': 0, 'note': ''}
                     )
+                    
                     orders_data.append({
-                        "Order Number": order_detail["order_sn"],
+                        "Order Number": str(order_detail["order_sn"]),
                         "Created": datetime.fromtimestamp(order_detail["create_time"]).strftime("%Y-%m-%d %H:%M"),
-                        "Product": item["item_name"],
-                        "Quantity": item["model_quantity_purchased"],
+                        "Product": str(item["item_name"]),
+                        "Quantity": int(item["model_quantity_purchased"]),
                         "Image": item["image_info"]["image_url"],
-                        "Item Number": item["item_sku"],
-                        "Received": tracking['received'],
-                        "Missing": tracking['missing_count'],
-                        "Note": tracking['note']
+                        "Item Number": str(item["item_sku"]),
+                        "Received": bool(tracking['received']),
+                        "Missing": int(tracking['missing_count']),
+                        "Note": str(tracking['note'])
                     })
         
         return pd.DataFrame(orders_data)
@@ -482,20 +503,27 @@ def handle_data_editor_changes(edited_df, db):
         
         # Compare current and previous states
         for (order_number, product), current_row in current_state.items():
+            # Ensure proper type conversion for comparison
+            received = bool(current_row.get('Received', False))
+            missing = int(current_row.get('Missing', 0))
+            note = str(current_row.get('Note', ''))
+            
             previous_row = previous_state.get((order_number, product), {})
+            previous_received = bool(previous_row.get('Received', False))
+            previous_missing = int(previous_row.get('Missing', 0))
+            previous_note = str(previous_row.get('Note', ''))
             
             # Check if any of the editable fields have changed
-            if (
-                current_row.get('Received') != previous_row.get('Received') or
-                current_row.get('Missing') != previous_row.get('Missing') or
-                current_row.get('Note') != previous_row.get('Note')
-            ):
+            if (received != previous_received or 
+                missing != previous_missing or 
+                note != previous_note):
+                
                 changes.append((
                     str(order_number),
                     str(product),
-                    bool(current_row['Received']),  # Explicit boolean conversion
-                    int(current_row['Missing']),
-                    str(current_row['Note'])
+                    received,
+                    missing,
+                    note
                 ))
         
         if changes:
@@ -507,8 +535,29 @@ def handle_data_editor_changes(edited_df, db):
             except Exception as e:
                 st.error(f"Error saving changes: {str(e)}")
                 return False
+    else:
+        # First load - save initial state
+        st.session_state.last_edited_df = edited_df.copy()
+        
+        # Save all rows as initial state
+        initial_records = [
+            (
+                str(row['Order Number']),
+                str(row['Product']),
+                bool(row['Received']),
+                int(row['Missing']),
+                str(row['Note'])
+            )
+            for _, row in edited_df.iterrows()
+        ]
+        
+        try:
+            db.batch_upsert_order_tracking(initial_records)
+            return True
+        except Exception as e:
+            st.error(f"Error saving initial state: {str(e)}")
+            return False
     
-    st.session_state.last_edited_df = edited_df.copy()
     return False
 
 def apply_filters(df, status_filter, show_preorders_only):
