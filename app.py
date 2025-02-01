@@ -404,13 +404,8 @@ def on_data_change():
         db = OrderDatabase()
         original_df = st.session_state.orders_df
         
-        changes_made = False
-        
         # Process each edited row
         for row_idx_str, changes in edited_rows.items():
-            if not changes:  # Skip if no actual changes
-                continue
-                
             row_idx = int(row_idx_str)
             original_row = original_df.iloc[row_idx]
             
@@ -423,28 +418,21 @@ def on_data_change():
             missing = changes.get("Missing", original_row["Missing"])
             note = changes.get("Note", original_row["Note"])
             
-            # Only save if there are actual changes
-            if (received != original_row["Received"] or 
-                missing != original_row["Missing"] or 
-                note != original_row["Note"]):
-                
-                # Save to database
-                db.upsert_order_tracking(
-                    order_sn=str(order_sn),
-                    product_name=str(product_name),
-                    received=bool(received),
-                    missing_count=int(missing) if pd.notna(missing) else 0,
-                    note=str(note) if pd.notna(note) else ""
-                )
-                
-                # Update the DataFrame in session state
-                st.session_state.orders_df.at[row_idx, "Received"] = received
-                st.session_state.orders_df.at[row_idx, "Missing"] = missing
-                st.session_state.orders_df.at[row_idx, "Note"] = note
-                changes_made = True
-        
-        if changes_made:
-            st.toast("✅ Changes saved!", icon="✅")
+            # Save to database
+            db.upsert_order_tracking(
+                order_sn=str(order_sn),
+                product_name=str(product_name),
+                received=bool(received),
+                missing_count=int(missing) if pd.notna(missing) else 0,
+                note=str(note) if pd.notna(note) else ""
+            )
+            
+            # Update the DataFrame in session state
+            st.session_state.orders_df.at[row_idx, "Received"] = received
+            st.session_state.orders_df.at[row_idx, "Missing"] = missing
+            st.session_state.orders_df.at[row_idx, "Note"] = note
+            
+        st.toast("✅ Changes saved!")
             
     except Exception as e:
         st.error(f"Error saving changes: {str(e)}")
@@ -759,20 +747,16 @@ def main():
 
     
         # Use data editor
-        with st.form(key="editor_form", clear_on_submit=False):
-            edited_df = st.data_editor(
-                filtered_df,
-                column_config=column_config,
-                use_container_width=True,
-                key="orders_editor",
-                num_rows="fixed",
-                height=600,
-                disabled=["Order Number", "Created", "Product", "Quantity", "Image", "Item Spec", "Item Number"],
-                on_change=on_data_change
-            )
-            
-            # Hide the form submit button since we're handling changes via on_change
-            st.form_submit_button("Submit", type="primary", use_container_width=True, style="display: none;")
+        edited_df = st.data_editor(
+            filtered_df,
+            column_config=column_config,
+            use_container_width=True,
+            key="orders_editor",
+            num_rows="fixed",
+            height=600,
+            disabled=["Order Number", "Created", "Product", "Quantity", "Image", "Item Spec", "Item Number"],
+            on_change=on_data_change
+        )
         # Update main DataFrame if needed
         if "orders_df" in st.session_state and edited_df is not None:
             st.session_state.orders_df = edited_df.copy()
