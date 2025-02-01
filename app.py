@@ -381,40 +381,49 @@ def initialize_session_state():
         st.session_state.orders_need_refresh = True
     if "orders_df" not in st.session_state:
         st.session_state.orders_df = pd.DataFrame()
-    if "editor_key" not in st.session_state:
-        st.session_state.editor_key = 0
-    if "previous_data" not in st.session_state:
-        st.session_state.previous_data = None
+    if "editor_changes" not in st.session_state:
+        st.session_state.editor_changes = []
 
-def handle_editor_change():
-    """Callback function for data editor changes"""
-    if st.session_state.orders_editor is not None and st.session_state.previous_data is not None:
-        current_data = pd.DataFrame(st.session_state.orders_editor)
-        previous_data = st.session_state.previous_data
-        
+
+def save_editor_changes():
+    """Save the current batch of changes to the database"""
+    if st.session_state.editor_changes:
         db = OrderDatabase()
-        changes = []
-        
-        # Compare current data with previous data
-        for idx, row in current_data.iterrows():
-            prev_row = previous_data.iloc[idx]
-            if any(row[col] != prev_row[col] for col in ["Received", "Missing", "Note"]):
-                changes.append((
+        try:
+            db.batch_upsert_order_tracking(st.session_state.editor_changes)
+            st.session_state.editor_changes = []  # Clear the changes after saving
+            st.toast("Changes saved successfully!")
+        except Exception as e:
+            st.error(f"Error saving changes: {str(e)}")
+
+def handle_cell_change(change):
+    """Handle individual cell changes in the editor"""
+    if isinstance(change, dict):
+        row_index = change.get('row', None)
+        if row_index is not None:
+            try:
+                df = pd.DataFrame(st.session_state.orders_editor)
+                row = df.iloc[row_index]
+                
+                # Create a change tuple
+                change_tuple = (
                     str(row["Order Number"]),
                     str(row["Product"]),
                     bool(row["Received"]),
                     int(row["Missing"]) if pd.notna(row["Missing"]) else 0,
                     str(row["Note"]) if pd.notna(row["Note"]) else ""
-                ))
-        
-        # Batch update if there are changes
-        if changes:
-            try:
-                db.batch_upsert_order_tracking(changes)
-                st.session_state.previous_data = current_data.copy()  # Update previous data after successful save
-                st.toast("Changes saved successfully!")
+                )
+                
+                # Add to changes list if not already present
+                if change_tuple not in st.session_state.editor_changes:
+                    st.session_state.editor_changes.append(change_tuple)
+                
+                # Save changes if we have accumulated some
+                if len(st.session_state.editor_changes) >= 1:
+                    save_editor_changes()
+                    
             except Exception as e:
-                st.error(f"Error saving changes: {str(e)}")
+                st.error(f"Error processing change: {str(e)}")
 
 
 def handle_authentication():
@@ -723,8 +732,7 @@ def main():
             )
         }
 
-        if st.session_state.previous_data is None:
-            st.session_state.previous_data = filtered_df.copy()
+
     
         # Use data editor
         # Use data editor
@@ -736,12 +744,21 @@ def main():
             num_rows="fixed",
             height=600,
             disabled=["Order Number", "Created", "Product", "Quantity", "Image", "Item Spec", "Item Number"],
-            on_change=handle_editor_change
+            on_change=handle_cell_change
         )
         
-        # Update the main DataFrame in session state without triggering a rerun
+        # Add a save button for manual saving if needed
+        if st.button("💾 Save Changes", key="save_changes"):
+            save_editor_changes()
+        
+        # Update the main DataFrame without causing a rerun
         if "orders_df" in st.session_state:
-            st.session_state.orders_df = update_orders_df(st.session_state.orders_df, edited_df)
+            current_df = pd.DataFrame(st.session_state.orders_editor)
+            st.session_state.orders_df = update_orders_df(st.session_state.orders_df, current_df)
+
+        # Show pending changes count
+        if st.session_state.editor_changes:
+            st.info(f"Pending changes: {len(st.session_state.editor_changes)}")
           
         
         # Statistics and Metrics
@@ -800,6 +817,25 @@ def main():
                 st.success("Data copied to clipboard!")
     else:
         st.info("No orders found in the selected time range.")
+
+def update_orders_df(original_df, edited_df):
+    """Update the main orders DataFrame with edited changes while preserving column order"""
+    # Store original column order
+    column_order = original_df.columns.tolist()
+    
+    # Ensure both DataFrames have the same index
+    original_df = original_df.set_index(['Order Number', 'Product'])
+    edited_df = edited_df.set_index(['Order Number', 'Product'])
+    
+    # Update only the editable columns
+    editable_cols = ["Received", "Missing", "Note"]
+    for col in editable_cols:
+        if col in edited_df.columns:
+            original_df[col] = edited_df[col]
+    
+    # Reset index and reorder columns
+    updated_df = original_df.reset_index()
+    return updated_df[column_order]
 
 if __name__ == "__main__":
     main()
