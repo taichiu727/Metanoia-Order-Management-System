@@ -373,6 +373,7 @@ def initialize_session_state():
             if token_age < (token["expire_in"] - 300):  # Token is still valid
                 st.session_state.authentication_state = "complete"
     
+    # Initialize all required session state variables
     if "orders" not in st.session_state:
         st.session_state.orders = []
     if "order_details" not in st.session_state:
@@ -381,7 +382,14 @@ def initialize_session_state():
         st.session_state.orders_need_refresh = True
     if "orders_df" not in st.session_state:
         st.session_state.orders_df = pd.DataFrame()
-
+    if "last_edited_df" not in st.session_state:
+        st.session_state.last_edited_df = None
+    if "show_stats" not in st.session_state:
+        st.session_state.show_stats = False
+    if "status_filter" not in st.session_state:
+        st.session_state.status_filter = "All"
+    if "show_preorders" not in st.session_state:
+        st.session_state.show_preorders = False
 
 
 def on_data_change():
