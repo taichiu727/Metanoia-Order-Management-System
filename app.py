@@ -711,8 +711,13 @@ def orders_table(filtered_df):
             help="Additional notes"
         )
     }
+    cleaned_df = filtered_df.copy()
+    cleaned_df["Received"] = cleaned_df["Received"].fillna(False)
+    cleaned_df["Missing"] = cleaned_df["Missing"].fillna(0)
+    cleaned_df["Note"] = cleaned_df["Note"].fillna("")
 
     edited_df = st.data_editor(
+        cleaned_df,
         filtered_df,
         column_config=column_config,
         use_container_width=True,
