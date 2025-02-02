@@ -630,7 +630,6 @@ def update_orders_df(original_df, edited_df):
     # Reorder columns to match original order
     return updated_df[column_order]
 
-@st.fragment()
 def main():
     st.set_page_config(page_title="Shopee Order Management", layout="wide")
     
