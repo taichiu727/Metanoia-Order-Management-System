@@ -383,7 +383,7 @@ def initialize_session_state():
         st.session_state.orders_df = pd.DataFrame()
 
 
-@st.fragment
+
 def on_data_change():
     """Handle changes in the data editor"""
     if "orders_editor" not in st.session_state:
@@ -524,6 +524,7 @@ def fetch_and_process_orders(token, db):
                     })
         
         return pd.DataFrame(orders_data)
+
 
 def apply_filters(df, status_filter, show_preorders_only):
     """Apply filters to the DataFrame"""
