@@ -383,7 +383,7 @@ def initialize_session_state():
         st.session_state.orders_df = pd.DataFrame()
 
 
-
+@st.fragment
 def on_data_change():
     """Handle changes in the data editor"""
     if "orders_editor" not in st.session_state:
@@ -525,23 +525,6 @@ def fetch_and_process_orders(token, db):
         
         return pd.DataFrame(orders_data)
 
-def handle_data_editor_changes(edited_df, db):
-    """Handle changes made in the data editor"""
-    if st.session_state.last_edited_df is not None:
-        changes = []
-        for idx, row in edited_df.iterrows():
-            last_row = st.session_state.last_edited_df.iloc[idx]
-            if (row[["Received", "Missing", "Note"]] != last_row[["Received", "Missing", "Note"]]).any():
-                changes.append((str(row["Order Number"]), str(row["Product"]), bool(row["Received"]), int(row["Missing"]), str(row["Note"])))
-        
-        if changes:
-            db.batch_upsert_order_tracking(changes)
-            st.session_state.orders_df = update_orders_df(st.session_state.orders_df, edited_df)
-            st.session_state.last_edited_df = edited_df.copy()
-            st.toast("Changes saved!")
-    else:
-        st.session_state.last_edited_df = edited_df.copy()
-
 def apply_filters(df, status_filter, show_preorders_only):
     """Apply filters to the DataFrame"""
     filtered_df = df.copy()
@@ -630,7 +613,7 @@ def update_orders_df(original_df, edited_df):
     # Reorder columns to match original order
     return updated_df[column_order]
 
-@st.fragment
+
 def main():
     st.set_page_config(page_title="Shopee Order Management", layout="wide")
     
