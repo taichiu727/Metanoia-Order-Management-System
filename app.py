@@ -718,7 +718,6 @@ def orders_table(filtered_df):
 
     edited_df = st.data_editor(
         cleaned_df,
-        filtered_df,
         column_config=column_config,
         use_container_width=True,
         key="orders_editor",
