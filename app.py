@@ -738,9 +738,11 @@ def orders_table(filtered_df):
         disabled=["Order Number", "Created", "Product", "Quantity", "Image", "Item Spec", "Item Number"]
     )
 
+    # Check if there are changes
     if edited_df is not None and not edited_df.equals(filtered_df):
-        handle_data_editor_changes(edited_df, OrderDatabase())
-        st.rerun(scope="fragment")
+        # Handle the changes directly here instead of calling st.rerun
+        db = OrderDatabase()
+        handle_data_editor_changes(edited_df, db)
 
     return edited_df
 
@@ -842,9 +844,12 @@ def handle_data_editor_changes(edited_df, db):
                 ))
         
         if changes:
-            db.batch_upsert_order_tracking(changes)
-            st.session_state.last_edited_df = edited_df.copy()
-            st.toast("✅ Changes saved!")
+            try:
+                db.batch_upsert_order_tracking(changes)
+                st.session_state.last_edited_df = edited_df.copy()
+                st.toast("✅ Changes saved!")
+            except Exception as e:
+                st.error(f"Error saving changes: {str(e)}")
     else:
         st.session_state.last_edited_df = edited_df.copy()
 
