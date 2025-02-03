@@ -553,7 +553,7 @@ def fetch_and_process_orders(token, db):
                         "Image": item["image_info"]["image_url"],
                         "Item Spec": item["model_name"],
                         "Item Number": item["item_sku"],
-                        "Group Shipment": item["group_shipmnet_id"],
+                        "Group Shipment": item["group_shipment_id"],
                         "Received": tracking['received'],
                         "Missing": tracking['missing_count'],
                         "Note": tracking['note']
