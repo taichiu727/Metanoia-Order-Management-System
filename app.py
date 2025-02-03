@@ -701,6 +701,34 @@ def sidebar_controls():
 @st.fragment
 def orders_table(filtered_df):
     """Fragment for the orders data editor"""
+    st.markdown("""
+        <style>
+        /* Increase font size */
+        .stDataFrame {
+            font-size: 16px;
+        }
+        /* Increase row height and improve spacing */
+        .stDataFrame tbody tr {
+            height: 80px !important;  /* Increased row height */
+            line-height: 1.5 !important;
+        }
+        /* Adjust cell padding */
+        .stDataFrame td, .stDataFrame th {
+            padding: 15px 10px !important;
+            vertical-align: middle !important;
+        }
+        /* Make the header row stand out */
+        .stDataFrame thead tr {
+            background-color: #f0f2f6 !important;
+            height: 50px !important;
+        }
+        /* Improve readability */
+        .stDataFrame {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+    
     column_config = {
         "Order Number": st.column_config.TextColumn(
             "Order Number",
