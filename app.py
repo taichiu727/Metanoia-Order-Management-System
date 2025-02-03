@@ -709,7 +709,7 @@ def orders_table(filtered_df):
         }
         /* Increase row height and improve spacing */
         .stDataFrame tbody tr {
-            height: 80px !important;  /* Increased row height */
+            height: 200px !important;  /* Increased row height */
             line-height: 1.5 !important;
         }
         /* Adjust cell padding */
@@ -728,7 +728,7 @@ def orders_table(filtered_df):
         }
         </style>
     """, unsafe_allow_html=True)
-    
+
     column_config = {
         "Order Number": st.column_config.TextColumn(
             "Order Number",
