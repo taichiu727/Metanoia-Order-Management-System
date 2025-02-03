@@ -760,7 +760,7 @@ def orders_table(filtered_df):
         use_container_width=True,
         key="orders_editor",
         num_rows="fixed",
-        height=st.session_state.viewport_height - 200,
+        height=st.session_state.viewport_height,
         disabled=["Order Number", "Created", "Product", "Quantity", "Image", "Item Spec", "Item Number"]
     )
 
