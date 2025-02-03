@@ -548,6 +548,7 @@ def fetch_and_process_orders(token, db):
                     orders_data.append({
                         "Order Number": order_detail["order_sn"],
                         "Created": datetime.fromtimestamp(order_detail["create_time"]).strftime("%Y-%m-%d %H:%M"),
+                        "Deadline": datetime.fromtimestamp(order_detail["ship_by_date"]).strftime("%Y-%m-%d %H:%M"),
                         "Product": item["item_name"],
                         "Quantity": item["model_quantity_purchased"],
                         "Image": item["image_info"]["image_url"],
@@ -713,6 +714,11 @@ def orders_table(filtered_df):
             "Created",
             width="small",
             help="Order creation date and time"
+        ),
+        "Deadline": st.column_config.TextColumn(
+            "Deadline",
+            width="small",
+            help="Order deadline"
         ),
         "Product": st.column_config.TextColumn(
             "Product",
