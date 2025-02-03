@@ -702,39 +702,12 @@ def sidebar_controls():
 def orders_table(filtered_df):
     """Fragment for the orders data editor"""
     st.markdown("""
-        <style>
-        /* Increase font size */
-        .stDataFrame {
-            font-size: 16px;
+    <style>
+        .stTable tr {
+            height: 200px; # use this to adjust the height
         }
-        /* Target data editor rows specifically */
-        [data-testid="stDataFrameCell"] {
-            min-height: 120px !important;
-            height: 120px !important;
-            padding: 15px 10px !important;
-            vertical-align: middle !important;
-        }
-        /* Force minimum height on cells */
-        div[data-testid="stDataFrameContainer"] [data-testid="stDataFrameRow"] {
-            min-height: 120px !important;
-        }
-        /* Ensure images maintain aspect ratio */
-        [data-testid="stDataFrameCell"] img {
-            max-height: 100px !important;
-            width: auto !important;
-            object-fit: contain !important;
-        }
-        /* Make the header row stand out */
-        .stDataFrame thead tr {
-            background-color: #f0f2f6 !important;
-            height: 50px !important;
-        }
-        /* Improve readability */
-        .stDataFrame {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        }
-        </style>
-    """, unsafe_allow_html=True)
+    </style>
+""", unsafe_allow_html=True)
 
     column_config = {
         "Order Number": st.column_config.TextColumn(
