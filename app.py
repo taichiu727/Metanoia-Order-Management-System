@@ -704,8 +704,8 @@ def orders_table(filtered_df):
     image_style = """
     <style>
     [data-testid="stDataFrameCell"] img {
-        max-width: 300px !important;
-        max-height: 300px !important;
+        max-width: 500px !important;
+        max-height: 500px !important;
         width: auto !important;
         height: auto !important;
     }
