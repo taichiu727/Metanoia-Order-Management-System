@@ -701,46 +701,6 @@ def sidebar_controls():
 @st.fragment
 def orders_table(filtered_df):
     """Fragment for the orders data editor"""
-    st.markdown("""
-        <style>
-        /* Target the Streamlit data editor table */
-        .stDataFrame div[role="row"] {
-            min-height: 300px !important;
-        }
-        
-        /* Target the cells directly */
-        .stDataFrame div[role="cell"] {
-            min-height: 300px !important;
-            padding: 15px 10px !important;
-        }
-        
-        /* Target the grid cells */
-        .stDataFrame div[role="gridcell"] {
-            min-height: 120px !important;
-            padding: 15px 10px !important;
-        }
-        
-        /* Increase font size */
-        .stDataFrame {
-            font-size: 16px !important;
-        }
-
-        /* Make images larger */
-        .stDataFrame img {
-            max-height: 100px !important;
-            width: auto !important;
-            object-fit: contain !important;
-        }
-        
-        /* Style the header */
-        .stDataFrame div[role="columnheader"] {
-            background-color: #f0f2f6 !important;
-            min-height: 50px !important;
-            font-weight: bold !important;
-        }
-        </style>
-    """, unsafe_allow_html=True)
-
     column_config = {
         "Order Number": st.column_config.TextColumn(
             "Order Number",
@@ -764,8 +724,10 @@ def orders_table(filtered_df):
         ),
         "Image": st.column_config.ImageColumn(
             "Image",
-            width="small",
+            width="medium",
             help="Product image"
+            width_px=200,  # Added explicit width in pixels
+            height_px=200  # Added explicit height in pixels
         ),
         "Item Spec": st.column_config.TextColumn(
             "Item Spec",
