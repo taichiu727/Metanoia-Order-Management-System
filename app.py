@@ -724,10 +724,8 @@ def orders_table(filtered_df):
         ),
         "Image": st.column_config.ImageColumn(
             "Image",
-            width="medium",
+            column_width=300,
             help="Product image"
-            width_px=200,  # Added explicit width in pixels
-            height_px=200  # Added explicit height in pixels
         ),
         "Item Spec": st.column_config.TextColumn(
             "Item Spec",
