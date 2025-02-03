@@ -702,12 +702,44 @@ def sidebar_controls():
 def orders_table(filtered_df):
     """Fragment for the orders data editor"""
     st.markdown("""
-    <style>
-        .stTable tr {
-            height: 200px; # use this to adjust the height
+        <style>
+        /* Target the Streamlit data editor table */
+        .stDataFrame div[role="row"] {
+            min-height: 120px !important;
         }
-    </style>
-""", unsafe_allow_html=True)
+        
+        /* Target the cells directly */
+        .stDataFrame div[role="cell"] {
+            min-height: 120px !important;
+            padding: 15px 10px !important;
+        }
+        
+        /* Target the grid cells */
+        .stDataFrame div[role="gridcell"] {
+            min-height: 120px !important;
+            padding: 15px 10px !important;
+        }
+        
+        /* Increase font size */
+        .stDataFrame {
+            font-size: 16px !important;
+        }
+
+        /* Make images larger */
+        .stDataFrame img {
+            max-height: 100px !important;
+            width: auto !important;
+            object-fit: contain !important;
+        }
+        
+        /* Style the header */
+        .stDataFrame div[role="columnheader"] {
+            background-color: #f0f2f6 !important;
+            min-height: 50px !important;
+            font-weight: bold !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
 
     column_config = {
         "Order Number": st.column_config.TextColumn(
