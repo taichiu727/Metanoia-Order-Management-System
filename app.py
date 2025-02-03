@@ -707,15 +707,22 @@ def orders_table(filtered_df):
         .stDataFrame {
             font-size: 16px;
         }
-        /* Increase row height and improve spacing */
-        .stDataFrame tbody tr {
-            height: 200px !important;  /* Increased row height */
-            line-height: 1.5 !important;
-        }
-        /* Adjust cell padding */
-        .stDataFrame td, .stDataFrame th {
+        /* Target data editor rows specifically */
+        [data-testid="stDataFrameCell"] {
+            min-height: 120px !important;
+            height: 120px !important;
             padding: 15px 10px !important;
             vertical-align: middle !important;
+        }
+        /* Force minimum height on cells */
+        div[data-testid="stDataFrameContainer"] [data-testid="stDataFrameRow"] {
+            min-height: 120px !important;
+        }
+        /* Ensure images maintain aspect ratio */
+        [data-testid="stDataFrameCell"] img {
+            max-height: 100px !important;
+            width: auto !important;
+            object-fit: contain !important;
         }
         /* Make the header row stand out */
         .stDataFrame thead tr {
