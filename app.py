@@ -701,17 +701,8 @@ def sidebar_controls():
 @st.fragment
 def orders_table(filtered_df):
     """Fragment for the orders data editor"""
-    image_style = """
-    <style>
-    [data-testid="stDataFrameCell"] img {
-        max-width: 500px !important;
-        max-height: 500px !important;
-        width: auto !important;
-        height: auto !important;
-    }
-    </style>
-    """
-    st.markdown(image_style, unsafe_allow_html=True)
+
+
     column_config = {
         "Order Number": st.column_config.TextColumn(
             "Order Number",
@@ -735,6 +726,7 @@ def orders_table(filtered_df):
         ),
         "Image": st.column_config.ImageColumn(
             "Image",
+            width="small",
             help="Product image"
         ),
         "Item Spec": st.column_config.TextColumn(
@@ -770,6 +762,7 @@ def orders_table(filtered_df):
         use_container_width=True,
         key="orders_editor",
         num_rows="fixed",
+        row_height=300,
         height=st.session_state.viewport_height,
         disabled=["Order Number", "Created", "Product", "Quantity", "Image", "Item Spec", "Item Number"]
     )
