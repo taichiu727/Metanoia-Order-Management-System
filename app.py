@@ -362,6 +362,32 @@ def get_order_details_bulk(access_token, client_id, client_secret, shop_id, orde
 
 def initialize_session_state():
     """Initialize all session state variables"""
+    if "viewport_height" not in st.session_state:
+        st.session_state.viewport_height = 800  # Default fallback height
+        
+    # Add JavaScript to get actual viewport height
+    st.markdown(
+        """
+        <script>
+        // Send viewport height to Streamlit
+        window.addEventListener('load', function() {
+            window.parent.addEventListener('message', function(e) {
+                if (e.data.viewport_height) {
+                    var height = e.data.viewport_height;
+                    window.parent.postMessage({
+                        type: "streamlit:setComponentValue",
+                        value: height
+                    }, "*");
+                }
+            });
+            window.parent.postMessage({
+                type: "streamlit:getViewportHeight"
+            }, "*");
+        });
+        </script>
+        """,
+        unsafe_allow_html=True
+    )
     if "authentication_state" not in st.session_state:
         st.session_state.authentication_state = "initial"
         # Check for existing valid token
@@ -734,7 +760,7 @@ def orders_table(filtered_df):
         use_container_width=True,
         key="orders_editor",
         num_rows="fixed",
-        height=600,
+        height=st.session_state.viewport_height - 200,
         disabled=["Order Number", "Created", "Product", "Quantity", "Image", "Item Spec", "Item Number"]
     )
 
@@ -854,13 +880,13 @@ def handle_data_editor_changes(edited_df, db):
         st.session_state.last_edited_df = edited_df.copy()
 
 def main():
-    st.set_page_config(page_title="Shopee Order Management", layout="wide")
+    st.set_page_config(page_title="Order Management", layout="wide")
     
     db = OrderDatabase()
     db.init_tables()
     initialize_session_state()
 
-    st.title("📦 Shopee Order Management")
+    st.title("📦 Order Management")
     
     # Handle authentication using fragment
     if not auth_fragment():
