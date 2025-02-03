@@ -705,12 +705,12 @@ def orders_table(filtered_df):
         <style>
         /* Target the Streamlit data editor table */
         .stDataFrame div[role="row"] {
-            min-height: 120px !important;
+            min-height: 300px !important;
         }
         
         /* Target the cells directly */
         .stDataFrame div[role="cell"] {
-            min-height: 120px !important;
+            min-height: 300px !important;
             padding: 15px 10px !important;
         }
         
