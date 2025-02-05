@@ -632,6 +632,7 @@ def product_management_tab():
             db.upsert_product_tag(row["Item Number"], row["Tag"])
         st.success("Tags updated successfully!")
 
+status_filter = "READY_TO_SHIP"
 
 def main():
     st.set_page_config(page_title="Shopee Order Management", layout="wide")
