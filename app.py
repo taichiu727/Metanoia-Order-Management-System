@@ -575,7 +575,7 @@ def update_orders_df(original_df, edited_df):
         edited_df.set_index(['Order Number', 'Product'])[update_cols]
     ).reset_index()
 
-
+@st.fragment
 def product_management_tab():
     st.header("Product Management")
     
@@ -636,6 +636,7 @@ def product_management_tab():
 
 status_filter = "READY_TO_SHIP"
 
+@st.fragment
 def main():
     st.set_page_config(page_title="Shopee Order Management", layout="wide")
     
