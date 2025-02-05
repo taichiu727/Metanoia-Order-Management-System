@@ -636,7 +636,6 @@ def product_management_tab():
 
 status_filter = "READY_TO_SHIP"
 
-@st.fragment
 def main():
     st.set_page_config(page_title="Shopee Order Management", layout="wide")
     
