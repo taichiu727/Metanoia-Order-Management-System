@@ -549,12 +549,7 @@ def handle_data_editor_changes(edited_df, db):
 def apply_filters(df, status_filter, show_preorders_only):
     """Apply filters to the DataFrame"""
     filtered_df = df.copy()
-    
-    if status_filter != "All" and "Status" in filtered_df.columns:
-        filtered_df = filtered_df[filtered_df["Status"] == status_filter]
-    
-    if show_preorders_only and "Is_Preorder" in filtered_df.columns:
-        filtered_df = filtered_df[filtered_df["Is_Preorder"]]
+
     
     return filtered_df
 
