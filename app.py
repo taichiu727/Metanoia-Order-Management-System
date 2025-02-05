@@ -431,6 +431,7 @@ def handle_authentication(db):
                 st.query_params.clear()
                 st.rerun()
             except Exception as e:
+                st.error(f"Authentication failed: {str(e)}")
                 db.clear_token()
                 return False
     return False
@@ -532,36 +533,7 @@ def apply_filters(df, status_filter, show_preorders_only):
     
     return filtered_df
 
-def handle_authentication(db):
-    """Handle the Shopee authentication flow using database storage"""
-    # First check if there's a valid token in the database
-    token = check_token_validity(db)
-    if token:
-        st.session_state.authentication_state = "complete"
-        return True
-        
-    if st.session_state.authentication_state != "complete":
-        st.info("Please authenticate with your Shopee account to continue.")
-        auth_url = get_auth_url()
-        st.markdown(f"[🔐 Authenticate with Shopee]({auth_url})")
-        
-        if "code" in st.query_params:
-            with st.spinner("Authenticating..."):
-                try:
-                    code = st.query_params["code"]
-                    token = fetch_token(code)
-                    # Add fetch time to token data
-                    token["fetch_time"] = int(time.time())
-                    db.save_token(token)
-                    st.session_state.authentication_state = "complete"
-                    st.query_params.clear()
-                    #st.rerun()
-                except Exception as e:
-                    st.error(f"Authentication failed: {str(e)}")
-                    db.clear_token()
-                    return False
-        return False
-    return True
+
 
 def check_token_validity(db):
     """Check if the stored token is valid and refresh if needed"""
