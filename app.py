@@ -673,6 +673,8 @@ def main():
 
     if "status_filter" not in st.session_state:
         st.session_state.status_filter = "READY_TO_SHIP"
+    if "show_preorders_only" not in st.session_state:
+        st.session_state.show_preorders_only = False
 
      # Tab selection
     tab1, tab2 = st.tabs(["Order Management", "Product Management"])
