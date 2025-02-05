@@ -33,6 +33,7 @@ def get_products(access_token):
     """Fetch all products from Shopee API"""
     timestamp = int(time.time())
     
+    path = "/api/v2/product/get_item_list"
     params = {
         'partner_id': CLIENT_ID,
         'timestamp': timestamp,
@@ -43,9 +44,14 @@ def get_products(access_token):
         'item_status': 'NORMAL'
     }
 
-    path = "/api/v2/product/get_item_list"
-    signature = generate_signature(CLIENT_ID, CLIENT_SECRET, path, timestamp)
-    params['sign'] = signature
+    base_string = f"{CLIENT_ID}{path}{timestamp}{access_token}{SHOP_ID}"
+    sign = hmac.new(
+        CLIENT_SECRET.encode('utf-8'),
+        base_string.encode('utf-8'),
+        hashlib.sha256
+    ).hexdigest()
+    
+    params['sign'] = sign
     url = f"https://partner.shopeemobile.com{path}"
     
     all_products = []
