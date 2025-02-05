@@ -24,23 +24,6 @@ class OrderDatabase:
         self.conn = None
         self.cursor = None
     
-    def get_order_tracking(self):
-        """Fetch all order tracking records from the database"""
-        try:
-            self.connect()
-            self.cursor.execute("""
-                SELECT 
-                    order_sn,
-                    product_name,
-                    received,
-                    missing_count,
-                    note
-                FROM order_tracking
-            """)
-            return self.cursor.fetchall()
-        finally:
-            self.close()
-    
     def connect(self):
         try:
             self.conn = psycopg2.connect(DATABASE_URL)
@@ -160,30 +143,34 @@ class OrderDatabase:
             self.conn.commit()
         finally:
             self.close()
+
     def batch_upsert_order_tracking(self, records):
         try:
             self.connect()
-            # Add transaction management
-            with self.conn:
-                self.cursor.executemany("""
-                    INSERT INTO order_tracking (order_sn, product_name, received, missing_count, note, last_updated)
-                    VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                    ON CONFLICT (order_sn, product_name) 
-                    DO UPDATE SET 
-                        received = EXCLUDED.received,
-                        missing_count = EXCLUDED.missing_count,
-                        note = EXCLUDED.note,
-                        last_updated = CURRENT_TIMESTAMP
-                """, records)
-        except psycopg2.Error as e:
-            st.error(f"Database error: {str(e)}")
-            raise
+            self.cursor.executemany("""
+                INSERT INTO order_tracking (order_sn, product_name, received, missing_count, note, last_updated)
+                VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT (order_sn, product_name) 
+                DO UPDATE SET 
+                    received = EXCLUDED.received,
+                    missing_count = EXCLUDED.missing_count,
+                    note = EXCLUDED.note,
+                    last_updated = CURRENT_TIMESTAMP
+            """, records)
+            self.conn.commit()
         finally:
             self.close()
 
-
-
-
+    def get_order_tracking(self):
+        try:
+            self.connect()
+            self.cursor.execute("""
+                SELECT order_sn, product_name, received, missing_count, note
+                FROM order_tracking
+            """)
+            return self.cursor.fetchall()
+        finally:
+            self.close()
 
 def generate_api_signature(api_type, partner_id, path, timestamp, access_token, shop_id, client_secret):
     """Generate Shopee API signature"""
@@ -362,32 +349,6 @@ def get_order_details_bulk(access_token, client_id, client_secret, shop_id, orde
 
 def initialize_session_state():
     """Initialize all session state variables"""
-    if "viewport_height" not in st.session_state:
-        st.session_state.viewport_height = 800  # Default fallback height
-        
-    # Add JavaScript to get actual viewport height
-    st.markdown(
-        """
-        <script>
-        // Send viewport height to Streamlit
-        window.addEventListener('load', function() {
-            window.parent.addEventListener('message', function(e) {
-                if (e.data.viewport_height) {
-                    var height = e.data.viewport_height;
-                    window.parent.postMessage({
-                        type: "streamlit:setComponentValue",
-                        value: height
-                    }, "*");
-                }
-            });
-            window.parent.postMessage({
-                type: "streamlit:getViewportHeight"
-            }, "*");
-        });
-        </script>
-        """,
-        unsafe_allow_html=True
-    )
     if "authentication_state" not in st.session_state:
         st.session_state.authentication_state = "initial"
         # Check for existing valid token
@@ -396,10 +357,10 @@ def initialize_session_state():
         if token:
             current_time = int(time.time())
             token_age = current_time - token["fetch_time"]
-            if token_age < (token["expire_in"] - 300):  # Token is still valid
+            # Consider token valid if more than 24 hours remaining
+            if token_age < (token["expire_in"] - 86400):
                 st.session_state.authentication_state = "complete"
     
-    # Initialize all required session state variables
     if "orders" not in st.session_state:
         st.session_state.orders = []
     if "order_details" not in st.session_state:
@@ -410,67 +371,8 @@ def initialize_session_state():
         st.session_state.orders_df = pd.DataFrame()
     if "last_edited_df" not in st.session_state:
         st.session_state.last_edited_df = None
-    if "show_stats" not in st.session_state:
-        st.session_state.show_stats = False
-    if "status_filter" not in st.session_state:
-        st.session_state.status_filter = "All"
-    if "show_preorders" not in st.session_state:
-        st.session_state.show_preorders = False
-
-
-
-def on_data_change():
-    """Handle changes in the data editor"""
-    if "orders_editor" not in st.session_state:
-        return
-        
-    try:
-        # Get edited data
-        editor_data = st.session_state.orders_editor
-        
-        # Check if we have edited rows
-        if "edited_rows" not in editor_data:
-            return
-            
-        edited_rows = editor_data["edited_rows"]
-        if not edited_rows:
-            return
-            
-        db = OrderDatabase()
-        original_df = st.session_state.orders_df
-        
-        # Process each edited row
-        for row_idx_str, changes in edited_rows.items():
-            row_idx = int(row_idx_str)
-            original_row = original_df.iloc[row_idx]
-            
-            # Get original values
-            order_sn = original_row["Order Number"]
-            product_name = original_row["Product"]
-            
-            # Get updated values, falling back to original if not changed
-            received = changes.get("Received", original_row["Received"])
-            missing = changes.get("Missing", original_row["Missing"])
-            note = changes.get("Note", original_row["Note"])
-            
-            # Save to database
-            db.upsert_order_tracking(
-                order_sn=str(order_sn),
-                product_name=str(product_name),
-                received=bool(received),
-                missing_count=int(missing) if pd.notna(missing) else 0,
-                note=str(note) if pd.notna(note) else ""
-            )
-            
-            # Update the DataFrame in session state
-            st.session_state.orders_df.at[row_idx, "Received"] = received
-            st.session_state.orders_df.at[row_idx, "Missing"] = missing
-            st.session_state.orders_df.at[row_idx, "Note"] = note
-            
-        st.toast("✅ Changes saved!")
-            
-    except Exception as e:
-        st.error(f"Error saving changes: {str(e)}")
+    if "pending_changes" not in st.session_state:
+        st.session_state.pending_changes = False
 
 
 def handle_authentication():
@@ -548,7 +450,6 @@ def fetch_and_process_orders(token, db):
                     orders_data.append({
                         "Order Number": order_detail["order_sn"],
                         "Created": datetime.fromtimestamp(order_detail["create_time"]).strftime("%Y-%m-%d %H:%M"),
-                        "Deadline": datetime.fromtimestamp(order_detail["ship_by_date"]).strftime("%Y-%m-%d %H:%M"),
                         "Product": item["item_name"],
                         "Quantity": item["model_quantity_purchased"],
                         "Image": item["image_info"]["image_url"],
@@ -572,11 +473,12 @@ def handle_data_editor_changes(edited_df, db):
         
         if changes:
             db.batch_upsert_order_tracking(changes)
-            st.session_state.orders_df = update_orders_df(st.session_state.orders_df, edited_df)
             st.session_state.last_edited_df = edited_df.copy()
-            st.toast("Changes saved!")
+            st.toast("Changes saved automatically!")
+            return True  # No rerun needed here
     else:
         st.session_state.last_edited_df = edited_df.copy()
+    return False
 
 def apply_filters(df, status_filter, show_preorders_only):
     """Apply filters to the DataFrame"""
@@ -630,8 +532,8 @@ def check_token_validity(db):
     current_time = int(time.time())
     token_age = current_time - token["fetch_time"]
     
-    # If token is expired or close to expiring, try to refresh it
-    if token_age > (token["expire_in"] - 300):  # Refresh if less than 5 minutes remaining
+    # Only refresh if less than 24 hours remaining
+    if token_age > (token["expire_in"] - 86400):  
         try:
             new_token_data = refresh_token(token["refresh_token"])
             if new_token_data:
@@ -653,251 +555,54 @@ def check_token_validity(db):
     return token
 
 def update_orders_df(original_df, edited_df):
-    """Update the main orders DataFrame with edited changes while preserving column order"""
-    # Store original column order
-    column_order = original_df.columns.tolist()
-    
-    # Perform update
+    """Update the main orders DataFrame with edited changes"""
     update_cols = ["Received", "Missing", "Note"]
-    updated_df = original_df.set_index(['Order Number', 'Product']).combine_first(
+    return original_df.set_index(['Order Number', 'Product']).combine_first(
         edited_df.set_index(['Order Number', 'Product'])[update_cols]
     ).reset_index()
-    
-    # Reorder columns to match original order
-    return updated_df[column_order]
-
-@st.fragment
-def sidebar_controls():
-    """Fragment for sidebar controls"""
-    st.header("Controls")
-    if st.session_state.authentication_state == "complete":
-        if st.button("🔄 Refresh Orders"):
-            st.session_state.orders_need_refresh = True
-            st.session_state.order_details = []
-            st.session_state.orders_df = pd.DataFrame()
-            st.session_state.last_edited_df = None
-            st.rerun()  # Full rerun needed for data refresh
-        
-        st.divider()
-        st.subheader("Filters")
-        status_filter = st.selectbox(
-            "Order Status",
-            ["All", "UNPAID", "READY_TO_SHIP", "SHIPPED", "COMPLETED", "CANCELLED"],
-            key="status_filter"
-        )
-        show_preorders_only = st.checkbox("Show Preorders Only", key="show_preorders")
-        
-        st.divider()
-        if st.button("📊 View Statistics"):
-            st.session_state.show_stats = not st.session_state.get('show_stats', False)
-            st.rerun(scope="fragment")
-        
-        st.divider()
-        if st.button("🚪 Logout"):
-            db = OrderDatabase()
-            db.clear_token()
-            st.session_state.clear()
-            st.rerun()
-
-@st.fragment
-def orders_table(filtered_df):
-    """Fragment for the orders data editor"""
-
-
-    column_config = {
-        "Order Number": st.column_config.TextColumn(
-            "Order Number",
-            width="small",
-            help="Shopee order number"
-        ),
-        "Created": st.column_config.TextColumn(
-            "Created",
-            width="small",
-            help="Order creation date and time"
-        ),
-        "Deadline": st.column_config.TextColumn(
-            "Deadline",
-            width="small",
-            help="Order deadline"
-        ),
-        "Product": st.column_config.TextColumn(
-            "Product",
-            width="small",
-            help="Product name"
-        ),
-        "Quantity": st.column_config.NumberColumn(
-            "Quantity",
-            width="small",
-            help="Ordered quantity"
-        ),
-        "Image": st.column_config.ImageColumn(
-            "Image",
-            width="small",
-            help="Product image"
-        ),
-        "Item Spec": st.column_config.TextColumn(
-            "Item Spec",
-            width="small",
-            help="Item Spec"
-        ),
-        "Item Number": st.column_config.TextColumn(
-            "Item Number",
-            width="small",
-            help="Item Number"
-        ),
-        "Received": st.column_config.CheckboxColumn(
-            "Received",
-            width="small",
-            help="Mark if item has been received"
-        ),
-        "Missing": st.column_config.NumberColumn(
-            "Missing",
-            width="small",
-            help="Number of missing items"
-        ),
-        "Note": st.column_config.TextColumn(
-            "Note",
-            width="medium",
-            help="Additional notes"
-        )
-    }
-
-    edited_df = st.data_editor(
-        filtered_df,
-        column_config=column_config,
-        use_container_width=True,
-        key="orders_editor",
-        num_rows="fixed",
-        height=st.session_state.viewport_height,
-        disabled=["Order Number", "Created", "Product", "Quantity", "Image", "Item Spec", "Item Number"]
-    )
-
-    # Check if there are changes
-    if edited_df is not None and not edited_df.equals(filtered_df):
-        # Handle the changes directly here instead of calling st.rerun
-        db = OrderDatabase()
-        handle_data_editor_changes(edited_df, db)
-
-    return edited_df
-
-@st.fragment
-def statistics_view(df):
-    """Fragment for statistics display"""
-    if st.session_state.get('show_stats', False):
-        st.subheader("📊 Order Statistics")
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Total Orders", len(df["Order Number"].unique()))
-        with col2:
-            st.metric("Total Items", df["Quantity"].sum())
-        with col3:
-            st.metric("Received Items", df["Received"].sum())
-        with col4:
-            st.metric("Missing Items", df["Missing"].sum())
-        
-        st.divider()
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader("Missing Items by Product")
-            missing_by_product = (
-                df[df["Missing"] > 0]
-                .groupby("Product")["Missing"]
-                .sum()
-                .sort_values(ascending=False)
-            )
-            if not missing_by_product.empty:
-                st.dataframe(missing_by_product)
-            else:
-                st.info("No missing items reported")
-        
-        with col2:
-            st.subheader("Pending Receipts")
-            pending_receipts = df[~df["Received"]].groupby("Product")["Quantity"].sum()
-            if not pending_receipts.empty:
-                st.dataframe(pending_receipts)
-            else:
-                st.info("No pending receipts")
-
-@st.fragment
-def export_controls(df):
-    """Fragment for export functionality"""
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("📥 Export to CSV"):
-            csv = df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="Download CSV",
-                data=csv,
-                file_name=f"shopee_orders_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv"
-            )
-    
-    with col2:
-        if st.button("📋 Copy to Clipboard"):
-            df.to_clipboard(index=False)
-            st.success("Data copied to clipboard!")
-
-@st.fragment
-def auth_fragment():
-    """Fragment for handling authentication"""
-    if st.session_state.authentication_state != "complete":
-        st.info("Please authenticate with your Shopee account to continue.")
-        auth_url = get_auth_url()
-        st.markdown(f"[🔐 Authenticate with Shopee]({auth_url})")
-        
-        if "code" in st.query_params:
-            with st.spinner("Authenticating..."):
-                try:
-                    code = st.query_params["code"]
-                    token = fetch_token(code)
-                    token["fetch_time"] = int(time.time())
-                    db = OrderDatabase()
-                    db.save_token(token)
-                    st.session_state.authentication_state = "complete"
-                    st.query_params.clear()
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Authentication failed: {str(e)}")
-                    return False
-        return False
-    return True
-
-def handle_data_editor_changes(edited_df, db):
-    """Handle changes made in the data editor"""
-    if st.session_state.last_edited_df is not None:
-        changes = []
-        for idx, row in edited_df.iterrows():
-            last_row = st.session_state.last_edited_df.iloc[idx]
-            if (row[["Received", "Missing", "Note"]] != last_row[["Received", "Missing", "Note"]]).any():
-                changes.append((
-                    str(row["Order Number"]),
-                    str(row["Product"]),
-                    bool(row["Received"]),
-                    int(row["Missing"]) if pd.notna(row["Missing"]) else 0,
-                    str(row["Note"]) if pd.notna(row["Note"]) else ""
-                ))
-        
-        if changes:
-            try:
-                db.batch_upsert_order_tracking(changes)
-                st.session_state.last_edited_df = edited_df.copy()
-                st.toast("✅ Changes saved!")
-            except Exception as e:
-                st.error(f"Error saving changes: {str(e)}")
-    else:
-        st.session_state.last_edited_df = edited_df.copy()
 
 def main():
-    st.set_page_config(page_title="Order Management", layout="wide")
+    st.set_page_config(page_title="Shopee Order Management", layout="wide")
     
+    # Initialize database and session state
     db = OrderDatabase()
     db.init_tables()
     initialize_session_state()
 
-    st.title("📦 Order Management")
+    # Sidebar controls
+    with st.sidebar:
+        st.header("Controls")
+        if st.session_state.authentication_state == "complete":
+            if st.button("🔄 Refresh Orders"):
+                st.session_state.orders_need_refresh = True
+                st.session_state.order_details = []
+                st.session_state.orders_df = pd.DataFrame()
+                st.session_state.last_edited_df = None
+                st.experimental_rerun()
+            
+            st.divider()
+            st.subheader("Filters")
+            status_filter = st.selectbox(
+                "Order Status",
+                ["All", "UNPAID", "READY_TO_SHIP", "SHIPPED", "COMPLETED", "CANCELLED"]
+            )
+            show_preorders_only = st.checkbox("Show Preorders Only")
+            
+            st.divider()
+            if st.button("📊 View Statistics"):
+                st.session_state.show_stats = not st.session_state.get('show_stats', False)
+            
+            st.divider()
+            if st.button("🚪 Logout"):
+                clear_token()
+                st.session_state.clear()
+                st.experimental_rerun()
+
+    # Main content
+    st.title("📦 Shopee Order Management")
     
-    # Handle authentication using fragment
-    if not auth_fragment():
+    # Handle authentication
+    if not handle_authentication(db):
         return
 
     # Check token validity
@@ -905,31 +610,147 @@ def main():
     if not token:
         st.error("Token not found or invalid")
         st.session_state.authentication_state = "initial"
-        return
+        #st.experimental_rerun()
 
-    # Use sidebar fragment within sidebar context
-    with st.sidebar:
-        sidebar_controls()
-
-    # Fetch and process orders if needed
+    # Fetch and display orders
     if st.session_state.orders_need_refresh:
         st.session_state.orders_df = fetch_and_process_orders(token, db)
         st.session_state.orders_need_refresh = False
 
     if not st.session_state.orders_df.empty:
-        # Apply filters based on session state
-        filtered_df = apply_filters(
-            st.session_state.orders_df, 
-            st.session_state.get('status_filter', 'All'),
-            st.session_state.get('show_preorders', False)
+        # Apply filters if any
+        filtered_df = apply_filters(st.session_state.orders_df, status_filter, show_preorders_only)
+        
+        # Configure editable columns
+        column_config = {
+            "Order Number": st.column_config.TextColumn(
+                "Order Number",
+                width="small",
+                help="Shopee order number"
+            ),
+            "Created": st.column_config.TextColumn(
+                "Created",
+                width="small",
+                help="Order creation date and time"
+            ),
+            "Product": st.column_config.TextColumn(
+                "Product",
+                width="small",
+                help="Product name"
+            ),
+            "Quantity": st.column_config.NumberColumn(
+                "Quantity",
+                width="small",
+                help="Ordered quantity"
+            ),
+            "Image": st.column_config.ImageColumn(
+                "Image",
+                width="small",
+                help="Product image"
+            ),
+             "Item Spec": st.column_config.TextColumn(
+                "Item Spec",
+                width="small",
+                help="Item Spec"
+            ),
+            "Item Number": st.column_config.TextColumn(
+                "Item Number",
+                width="small",
+                help="Item Number"
+            ),
+            "Received": st.column_config.CheckboxColumn(
+                "Received",
+                width="small",
+                help="Mark if item has been received"
+            ),
+            "Missing": st.column_config.NumberColumn(
+                "Missing",
+                width="small",
+                help="Number of missing items"
+            ),
+            "Note": st.column_config.TextColumn(
+                "Note",
+                width="medium",
+                help="Additional notes"
+            )
+        }
+
+        # Use data_editor with automatic saving
+        edited_df = st.data_editor(
+            filtered_df,
+            column_config=column_config,
+            use_container_width=True,
+            key="orders_editor",
+            num_rows="fixed",
+            height=600,
+            on_change=lambda: handle_data_editor_changes(edited_df, db), 
         )
-        
-        # Use fragments for main UI components
-        edited_df = orders_table(filtered_df)
-        statistics_view(edited_df)
-        
+
+        # Handle changes automatically when detected
+        if st.session_state.pending_changes:
+            if handle_data_editor_changes(edited_df, db):
+                st.session_state.pending_changes = False
+                # Update filtered_df after changes
+                st.session_state.filtered_df = edited_df.copy()
+                st.session_state.orders_df = update_orders_df(
+                    st.session_state.orders_df,
+                    edited_df
+                )
+
+        # Statistics and Metrics
+        if st.session_state.get('show_stats', False):
+            st.subheader("📊 Order Statistics")
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total Orders", len(edited_df["Order Number"].unique()))
+            with col2:
+                st.metric("Total Items", edited_df["Quantity"].sum())
+            with col3:
+                st.metric("Received Items", edited_df["Received"].sum())
+            with col4:
+                st.metric("Missing Items", edited_df["Missing"].sum())
+            
+            # Additional statistics
+            st.divider()
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader("Missing Items by Product")
+                missing_by_product = (
+                    edited_df[edited_df["Missing"] > 0]
+                    .groupby("Product")["Missing"]
+                    .sum()
+                    .sort_values(ascending=False)
+                )
+                if not missing_by_product.empty:
+                    st.dataframe(missing_by_product)
+                else:
+                    st.info("No missing items reported")
+            
+            with col2:
+                st.subheader("Pending Receipts")
+                pending_receipts = edited_df[~edited_df["Received"]].groupby("Product")["Quantity"].sum()
+                if not pending_receipts.empty:
+                    st.dataframe(pending_receipts)
+                else:
+                    st.info("No pending receipts")
+
+        # Export functionality
         st.divider()
-        export_controls(edited_df)
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📥 Export to CSV"):
+                csv = edited_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="Download CSV",
+                    data=csv,
+                    file_name=f"shopee_orders_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv"
+                )
+        
+        with col2:
+            if st.button("📋 Copy to Clipboard"):
+                edited_df.to_clipboard(index=False)
+                st.success("Data copied to clipboard!")
     else:
         st.info("No orders found in the selected time range.")
 
