@@ -646,10 +646,11 @@ def main():
     tab1, tab2 = st.tabs(["Order Management", "Product Management"])
 
     with tab1:
-        # Sidebar controls
         with st.sidebar:
             st.header("Controls")
-            status_filter = "READY_TO_SHIP"
+            status_filter = "All"  # Default value
+            show_preorders_only = False  # Default value
+            
             if st.session_state.authentication_state == "complete":
                 if st.button("🔄 Refresh Orders"):
                     st.session_state.orders_need_refresh = True
@@ -665,40 +666,24 @@ def main():
                     ["All", "UNPAID", "READY_TO_SHIP", "SHIPPED", "COMPLETED", "CANCELLED"]
                 )
                 show_preorders_only = st.checkbox("Show Preorders Only")
-                
-                st.divider()
-                if st.button("📊 View Statistics"):
-                    st.session_state.show_stats = not st.session_state.get('show_stats', False)
-                
-                st.divider()
-                if st.button("🚪 Logout"):
-                    clear_token()
-                    st.session_state.clear()
-                    st.experimental_rerun()
 
-        # Main content
         st.title("📦 Shopee Order Management")
-        
-        # Handle authentication
+
         if not handle_authentication(db):
             return
 
-        # Check token validity
         token = check_token_validity(db)
         if not token:
             st.error("Token not found or invalid")
             st.session_state.authentication_state = "initial"
-            #st.experimental_rerun()
+            return
 
-        # Fetch and display orders
         if st.session_state.orders_need_refresh:
             st.session_state.orders_df = fetch_and_process_orders(token, db)
             st.session_state.orders_need_refresh = False
 
         if not st.session_state.orders_df.empty:
-            # Apply filters if any
             filtered_df = apply_filters(st.session_state.orders_df, status_filter, show_preorders_only)
-            
             # Configure editable columns
             column_config = {
                 "Order Number": st.column_config.TextColumn(
