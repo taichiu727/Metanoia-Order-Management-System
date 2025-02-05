@@ -439,27 +439,48 @@ def handle_authentication(db):
 
 @st.fragment
 def display_order_table(filtered_df, db):
-    column_config = {
-        "Order Number": st.column_config.TextColumn("Order Number", width="small"),
-        "Created": st.column_config.TextColumn("Created", width="small"),
-        "Product": st.column_config.TextColumn("Product", width="small"),
-        "Quantity": st.column_config.NumberColumn("Quantity", width="small"),
-        "Image": st.column_config.ImageColumn("Image", width="small"),
-        "Item Spec": st.column_config.TextColumn("Item Spec", width="small"),
-        "Item Number": st.column_config.TextColumn("Item Number", width="small"),
-        "Received": st.column_config.CheckboxColumn("Received", width="small"),
-        "Missing": st.column_config.NumberColumn("Missing", width="small"),
-        "Note": st.column_config.TextColumn("Note", width="medium")
-    }
+    if "last_edited_df" not in st.session_state:
+        st.session_state.last_edited_df = filtered_df.copy()
 
-    return st.data_editor(
+    edited_df = st.data_editor(
         filtered_df,
-        column_config=column_config,
+        column_config={
+            "Order Number": st.column_config.TextColumn("Order Number", width="small"),
+            "Created": st.column_config.TextColumn("Created", width="small"),
+            "Product": st.column_config.TextColumn("Product", width="small"),
+            "Quantity": st.column_config.NumberColumn("Quantity", width="small"),
+            "Image": st.column_config.ImageColumn("Image", width="small"),
+            "Item Spec": st.column_config.TextColumn("Item Spec", width="small"),
+            "Item Number": st.column_config.TextColumn("Item Number", width="small"),
+            "Received": st.column_config.CheckboxColumn("Received", width="small"),
+            "Missing": st.column_config.NumberColumn("Missing", width="small"),
+            "Note": st.column_config.TextColumn("Note", width="medium")
+        },
         use_container_width=True,
         key="orders_editor",
         num_rows="fixed",
         height=600
     )
+
+    if not edited_df.equals(st.session_state.last_edited_df):
+        changes = []
+        for idx, row in edited_df.iterrows():
+            last_row = st.session_state.last_edited_df.iloc[idx]
+            if (row[["Received", "Missing", "Note"]] != last_row[["Received", "Missing", "Note"]]).any():
+                changes.append((
+                    str(row["Order Number"]), 
+                    str(row["Product"]), 
+                    bool(row["Received"]), 
+                    int(row["Missing"]), 
+                    str(row["Note"])
+                ))
+        
+        if changes:
+            db.batch_upsert_order_tracking(changes)
+            st.session_state.last_edited_df = edited_df.copy()
+            st.toast("Changes saved!")
+
+    return edited_df
 
 def fetch_and_process_orders(token, db):
     """Fetch orders and process them into a DataFrame"""
@@ -553,15 +574,7 @@ def apply_filters(df, status_filter, show_preorders_only):
     
     return filtered_df
 
-@st.fragment
-def handle_table_changes(edited_df, filtered_df, db):
-    if not edited_df.equals(filtered_df):
-        handle_data_editor_changes(edited_df, db)
-        st.session_state.filtered_df = edited_df.copy()
-        st.session_state.orders_df = update_orders_df(
-            st.session_state.orders_df,
-            edited_df
-        )
+
 
 def check_token_validity(db):
     """Check if the stored token is valid and refresh if needed"""
