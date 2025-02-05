@@ -6,6 +6,8 @@ import hmac
 import hashlib
 import requests
 import streamlit as st
+import datetime
+from datetime import timedelta
 
 # Configuration
 CLIENT_ID = "2007044"
@@ -35,13 +37,15 @@ def get_products(access_token):
     
     path = "/api/v2/product/get_item_list"
     params = {
-        'partner_id': CLIENT_ID,
-        'timestamp': timestamp,
         'access_token': access_token,
-        'shop_id': SHOP_ID,
+        'item_status': 'NORMAL',
         'offset': 0,
         'page_size': 100,
-        'item_status': 'NORMAL'
+        'partner_id': CLIENT_ID,
+        'shop_id': SHOP_ID,
+        'timestamp': timestamp,
+        'update_time_from': int((datetime.now() - timedelta(days=30)).timestamp()),
+        'update_time_to': timestamp
     }
 
     base_string = f"{CLIENT_ID}{path}{timestamp}{access_token}{SHOP_ID}"
