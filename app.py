@@ -437,6 +437,29 @@ def handle_authentication(db):
                 return False
     return False
 
+@st.fragment
+def display_order_table(filtered_df, db):
+    column_config = {
+        "Order Number": st.column_config.TextColumn("Order Number", width="small"),
+        "Created": st.column_config.TextColumn("Created", width="small"),
+        "Product": st.column_config.TextColumn("Product", width="small"),
+        "Quantity": st.column_config.NumberColumn("Quantity", width="small"),
+        "Image": st.column_config.ImageColumn("Image", width="small"),
+        "Item Spec": st.column_config.TextColumn("Item Spec", width="small"),
+        "Item Number": st.column_config.TextColumn("Item Number", width="small"),
+        "Received": st.column_config.CheckboxColumn("Received", width="small"),
+        "Missing": st.column_config.NumberColumn("Missing", width="small"),
+        "Note": st.column_config.TextColumn("Note", width="medium")
+    }
+
+    return st.data_editor(
+        filtered_df,
+        column_config=column_config,
+        use_container_width=True,
+        key="orders_editor",
+        num_rows="fixed",
+        height=600
+    )
 
 def fetch_and_process_orders(token, db):
     """Fetch orders and process them into a DataFrame"""
@@ -535,7 +558,15 @@ def apply_filters(df, status_filter, show_preorders_only):
     
     return filtered_df
 
-
+@st.fragment
+def handle_table_changes(edited_df, filtered_df, db):
+    if not edited_df.equals(filtered_df):
+        handle_data_editor_changes(edited_df, db)
+        st.session_state.filtered_df = edited_df.copy()
+        st.session_state.orders_df = update_orders_df(
+            st.session_state.orders_df,
+            edited_df
+        )
 
 def check_token_validity(db):
     """Check if the stored token is valid and refresh if needed"""
@@ -690,77 +721,8 @@ def main():
         if not st.session_state.orders_df.empty:
             filtered_df = apply_filters(st.session_state.orders_df, status_filter, show_preorders_only)
             # Configure editable columns
-            column_config = {
-                "Order Number": st.column_config.TextColumn(
-                    "Order Number",
-                    width="small",
-                    help="Shopee order number"
-                ),
-                "Created": st.column_config.TextColumn(
-                    "Created",
-                    width="small",
-                    help="Order creation date and time"
-                ),
-                "Product": st.column_config.TextColumn(
-                    "Product",
-                    width="small",
-                    help="Product name"
-                ),
-                "Quantity": st.column_config.NumberColumn(
-                    "Quantity",
-                    width="small",
-                    help="Ordered quantity"
-                ),
-                "Image": st.column_config.ImageColumn(
-                    "Image",
-                    width="small",
-                    help="Product image"
-                ),
-                "Item Spec": st.column_config.TextColumn(
-                    "Item Spec",
-                    width="small",
-                    help="Item Spec"
-                ),
-                "Item Number": st.column_config.TextColumn(
-                    "Item Number",
-                    width="small",
-                    help="Item Number"
-                ),
-                "Received": st.column_config.CheckboxColumn(
-                    "Received",
-                    width="small",
-                    help="Mark if item has been received"
-                ),
-                "Missing": st.column_config.NumberColumn(
-                    "Missing",
-                    width="small",
-                    help="Number of missing items"
-                ),
-                "Note": st.column_config.TextColumn(
-                    "Note",
-                    width="medium",
-                    help="Additional notes"
-                )
-            }
-
-            # Use data_editor with automatic saving
-            edited_df = st.data_editor(
-                filtered_df,
-                column_config=column_config,
-                use_container_width=True,
-                key="orders_editor",
-                num_rows="fixed",
-                height=600
-            )
-
-            # Handle changes automatically when detected
-            if not edited_df.equals(filtered_df):
-                handle_data_editor_changes(edited_df, db)
-                st.session_state.filtered_df = edited_df.copy()
-                st.session_state.orders_df = update_orders_df(
-                    st.session_state.orders_df,
-                    edited_df
-                )
+            edited_df = display_order_table(filtered_df, db)
+            handle_table_changes(edited_df, filtered_df, db)
 
             # Statistics and Metrics
             if st.session_state.get('show_stats', False):
