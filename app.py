@@ -732,7 +732,7 @@ def main():
             filtered_df = apply_filters(st.session_state.orders_df, status_filter, show_preorders_only)
             # Configure editable columns
             edited_df = display_order_table(filtered_df, db)
-            handle_table_changes(edited_df, filtered_df, db)
+            
 
             # Statistics and Metrics
             if st.session_state.get('show_stats', False):
