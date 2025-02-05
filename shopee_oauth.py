@@ -29,6 +29,48 @@ def get_auth_url():
             f"partner_id={CLIENT_ID}&timestamp={timestamp}&sign={signature}&"
             f"redirect={REDIRECT_URI}")
 
+def get_products(access_token):
+    """Fetch all products from Shopee API"""
+    timestamp = int(time.time())
+    
+    params = {
+        'partner_id': CLIENT_ID,
+        'timestamp': timestamp,
+        'access_token': access_token,
+        'shop_id': SHOP_ID,
+        'offset': 0,
+        'page_size': 100,
+        'item_status': 'NORMAL'
+    }
+
+    path = "/api/v2/product/get_item_list"
+    signature = generate_signature(CLIENT_ID, CLIENT_SECRET, path, timestamp)
+    params['sign'] = signature
+    url = f"https://partner.shopeemobile.com{path}"
+    
+    all_products = []
+    has_more = True
+    
+    while has_more:
+        try:
+            response = requests.get(url, params=params)
+            if response.status_code == 200:
+                data = response.json()
+                if "response" in data:
+                    products = data["response"].get("item", [])
+                    all_products.extend(products)
+                    has_more = data["response"].get("has_next_page", False)
+                    params['offset'] += params['page_size']
+                else:
+                    break
+            else:
+                raise Exception(f"Error fetching products: {response.text}")
+            time.sleep(0.5)
+        except Exception as e:
+            raise Exception(f"Error: {str(e)}")
+            
+    return all_products
+
 def fetch_token(code):
     if not code:
         raise ValueError("Authorization code is required")
