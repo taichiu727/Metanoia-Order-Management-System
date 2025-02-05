@@ -44,7 +44,7 @@ def get_products(access_token):
         'partner_id': CLIENT_ID,
         'shop_id': SHOP_ID,
         'timestamp': timestamp,
-        'update_time_from': int((datetime.now() - timedelta(days=30)).timestamp()),
+        'update_time_from': int((datetime.fromtimestamp(timestamp) - timedelta(days=30)).timestamp()),
         'update_time_to': timestamp
     }
 
