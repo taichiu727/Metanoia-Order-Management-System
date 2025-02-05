@@ -648,6 +648,7 @@ def main():
         # Sidebar controls
         with st.sidebar:
             st.header("Controls")
+            status_filter = "READY_TO_SHIP"
             if st.session_state.authentication_state == "complete":
                 if st.button("🔄 Refresh Orders"):
                     st.session_state.orders_need_refresh = True
