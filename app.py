@@ -418,7 +418,10 @@ def fetch_and_process_orders(token, db):
             st.error("Failed to fetch orders")
             return pd.DataFrame()
 
-        st.session_state.orders = orders_response["response"].get("order_list", [])
+        # Filter out shipped orders
+        orders = orders_response["response"].get("order_list", [])
+        unshipped_orders = [order for order in orders if order["order_status"] == "READY_TO_SHIP"]
+        st.session_state.orders = unshipped_orders
         
         if not st.session_state.orders:
             return pd.DataFrame()
@@ -439,7 +442,6 @@ def fetch_and_process_orders(token, db):
         order_details_list.sort(key=lambda x: x['create_time'], reverse=True)
         st.session_state.order_details = order_details_list
 
-        # Process orders into DataFrame
         tracking_data = {
             (item['order_sn'], item['product_name']): item 
             for item in db.get_order_tracking()
