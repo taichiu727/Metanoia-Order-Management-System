@@ -439,6 +439,9 @@ def handle_authentication(db):
 
 @st.fragment
 def display_order_table(filtered_df, db):
+    if "last_edited_df" not in st.session_state:
+        st.session_state.last_edited_df = filtered_df.copy()
+
     edited_df = st.data_editor(
         filtered_df,
         column_config={
@@ -456,27 +459,10 @@ def display_order_table(filtered_df, db):
         use_container_width=True,
         key="orders_editor",
         num_rows="fixed",
-        height=600
+        height=600,
+        on_change=lambda: handle_data_editor_changes(edited_df, db)
     )
 
-    if "last_edited_df" in st.session_state and not edited_df.equals(st.session_state.last_edited_df):
-        changes = []
-        for idx, row in edited_df.iterrows():
-            last_row = st.session_state.last_edited_df.iloc[idx]
-            if (row[["Received", "Missing", "Note"]] != last_row[["Received", "Missing", "Note"]]).any():
-                changes.append((
-                    str(row["Order Number"]), 
-                    str(row["Product"]), 
-                    bool(row["Received"]), 
-                    int(row["Missing"]), 
-                    str(row["Note"])
-                ))
-        
-        if changes:
-            db.batch_upsert_order_tracking(changes)
-            st.toast("Changes saved!")
-
-    st.session_state.last_edited_df = edited_df.copy()
     return edited_df
 
 def fetch_and_process_orders(token, db):
@@ -571,7 +557,15 @@ def apply_filters(df, status_filter, show_preorders_only):
     
     return filtered_df
 
-
+@st.fragment
+def handle_table_changes(edited_df, filtered_df, db):
+    if not edited_df.equals(filtered_df):
+        handle_data_editor_changes(edited_df, db)
+        st.session_state.filtered_df = edited_df.copy()
+        st.session_state.orders_df = update_orders_df(
+            st.session_state.orders_df,
+            edited_df
+        )
 
 def check_token_validity(db):
     """Check if the stored token is valid and refresh if needed"""
@@ -729,7 +723,7 @@ def main():
             filtered_df = apply_filters(st.session_state.orders_df, status_filter, show_preorders_only)
             # Configure editable columns
             edited_df = display_order_table(filtered_df, db)
-            
+            handle_table_changes(edited_df, filtered_df, db)
 
             # Statistics and Metrics
             if st.session_state.get('show_stats', False):
