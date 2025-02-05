@@ -375,27 +375,33 @@ def initialize_session_state():
         st.session_state.pending_changes = False
 
 
-def handle_authentication():
-    """Handle the Shopee authentication flow"""
-    if st.session_state.authentication_state != "complete":
-        st.info("Please authenticate with your Shopee account to continue.")
-        auth_url = get_auth_url()
-        st.markdown(f"[🔐 Authenticate with Shopee]({auth_url})")
-        
-        if "code" in st.query_params:
-            with st.spinner("Authenticating..."):
-                try:
-                    code = st.query_params["code"]
-                    token = fetch_token(code)
-                    #save_token(token)
-                    st.session_state.authentication_state = "complete"
-                    st.query_params.clear()
-                    #st.rerun()
-                except Exception as e:
-                    st.error(f"Authentication failed: {str(e)}")
-                   
-        return False
-    return True
+def handle_authentication(db):
+    """Handle the Shopee authentication flow using database storage"""
+    token = check_token_validity(db)
+    
+    if token:
+        st.session_state.authentication_state = "complete"
+        return True
+    
+    st.session_state.authentication_state = "initial"
+    st.info("Please authenticate with your Shopee account to continue.")
+    auth_url = get_auth_url()
+    st.markdown(f"[🔐 Authenticate with Shopee]({auth_url})")
+    
+    if "code" in st.query_params:
+        with st.spinner("Authenticating..."):
+            try:
+                code = st.query_params["code"]
+                token = fetch_token(code)
+                token["fetch_time"] = int(time.time())
+                db.save_token(token)
+                st.session_state.authentication_state = "complete"
+                st.query_params.clear()
+                st.rerun()
+            except Exception as e:
+                db.clear_token()
+                return False
+    return False
 
 
 def fetch_and_process_orders(token, db):
@@ -532,8 +538,7 @@ def check_token_validity(db):
     current_time = int(time.time())
     token_age = current_time - token["fetch_time"]
     
-    # Only refresh if less than 24 hours remaining
-    if token_age > (token["expire_in"] - 86400):  
+    if token_age > (token["expire_in"] - 86400):
         try:
             new_token_data = refresh_token(token["refresh_token"])
             if new_token_data:
@@ -547,8 +552,10 @@ def check_token_validity(db):
                 }
                 db.save_token(new_token)
                 return new_token
+            else:
+                db.clear_token()
+                return None
         except Exception as e:
-            st.error(f"Failed to refresh token: {str(e)}")
             db.clear_token()
             return None
     
