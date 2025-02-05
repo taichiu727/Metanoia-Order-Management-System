@@ -33,7 +33,8 @@ def get_auth_url():
 
 def get_products(access_token):
     """Fetch all products from Shopee API"""
-    timestamp = int(time.time())
+    now = int(time.time())
+    thirty_days_ago = now - (30 * 24 * 60 * 60)
     
     path = "/api/v2/product/get_item_list"
     params = {
@@ -43,12 +44,12 @@ def get_products(access_token):
         'page_size': 100,
         'partner_id': CLIENT_ID,
         'shop_id': SHOP_ID,
-        'timestamp': timestamp,
-        'update_time_from': int((datetime.fromtimestamp(timestamp) - timedelta(days=30)).timestamp()),
-        'update_time_to': timestamp
+        'timestamp': now,
+        'update_time_from': thirty_days_ago,
+        'update_time_to': now
     }
 
-    base_string = f"{CLIENT_ID}{path}{timestamp}{access_token}{SHOP_ID}"
+    base_string = f"{CLIENT_ID}{path}{now}{access_token}{SHOP_ID}"
     sign = hmac.new(
         CLIENT_SECRET.encode('utf-8'),
         base_string.encode('utf-8'),
