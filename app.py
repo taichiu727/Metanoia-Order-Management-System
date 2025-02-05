@@ -503,6 +503,7 @@ def fetch_and_process_orders(token, db):
         
         return pd.DataFrame(orders_data)
 
+@st.fragment
 def handle_data_editor_changes(edited_df, db):
     """Handle changes made in the data editor"""
     if st.session_state.last_edited_df is not None:
@@ -574,6 +575,7 @@ def update_orders_df(original_df, edited_df):
         edited_df.set_index(['Order Number', 'Product'])[update_cols]
     ).reset_index()
 
+
 def product_management_tab():
     st.header("Product Management")
     
@@ -642,13 +644,15 @@ def main():
     db.init_tables()
     initialize_session_state()
 
+    if "status_filter" not in st.session_state:
+        st.session_state.status_filter = "READY_TO_SHIP"
+
      # Tab selection
     tab1, tab2 = st.tabs(["Order Management", "Product Management"])
 
     with tab1:
         with st.sidebar:
             st.header("Controls")
-            status_filter = "All"  # Default value
             show_preorders_only = False  # Default value
             
             if st.session_state.authentication_state == "complete":
