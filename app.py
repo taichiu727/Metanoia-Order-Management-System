@@ -439,9 +439,6 @@ def handle_authentication(db):
 
 @st.fragment
 def display_order_table(filtered_df, db):
-    if "last_edited_df" not in st.session_state:
-        st.session_state.last_edited_df = filtered_df.copy()
-
     edited_df = st.data_editor(
         filtered_df,
         column_config={
@@ -462,7 +459,7 @@ def display_order_table(filtered_df, db):
         height=600
     )
 
-    if not edited_df.equals(st.session_state.last_edited_df):
+    if "last_edited_df" in st.session_state and not edited_df.equals(st.session_state.last_edited_df):
         changes = []
         for idx, row in edited_df.iterrows():
             last_row = st.session_state.last_edited_df.iloc[idx]
@@ -477,9 +474,9 @@ def display_order_table(filtered_df, db):
         
         if changes:
             db.batch_upsert_order_tracking(changes)
-            st.session_state.last_edited_df = edited_df.copy()
             st.toast("Changes saved!")
 
+    st.session_state.last_edited_df = edited_df.copy()
     return edited_df
 
 def fetch_and_process_orders(token, db):
