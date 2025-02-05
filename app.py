@@ -158,7 +158,7 @@ class OrderDatabase:
             return self.cursor.fetchall()
         finally:
             self.close()
-
+    
     def upsert_order_tracking(self, order_sn, product_name, received, missing_count, note):
         try:
             self.connect()
@@ -379,6 +379,7 @@ def get_order_details_bulk(access_token, client_id, client_secret, shop_id, orde
 
     return {"response": {"order_list": all_order_details}} if all_order_details else None
 
+
 def initialize_session_state():
     """Initialize all session state variables"""
     if "authentication_state" not in st.session_state:
@@ -503,7 +504,7 @@ def fetch_and_process_orders(token, db):
         
         return pd.DataFrame(orders_data)
 
-@st.fragment
+
 def handle_data_editor_changes(edited_df, db):
     """Handle changes made in the data editor"""
     if st.session_state.last_edited_df is not None:
@@ -575,7 +576,7 @@ def update_orders_df(original_df, edited_df):
         edited_df.set_index(['Order Number', 'Product'])[update_cols]
     ).reset_index()
 
-@st.fragment
+
 def product_management_tab():
     st.header("Product Management")
     
@@ -749,20 +750,17 @@ def main():
                 use_container_width=True,
                 key="orders_editor",
                 num_rows="fixed",
-                height=600,
-                on_change=lambda: handle_data_editor_changes(edited_df, db), 
+                height=600
             )
 
             # Handle changes automatically when detected
-            if st.session_state.pending_changes:
-                if handle_data_editor_changes(edited_df, db):
-                    st.session_state.pending_changes = False
-                    # Update filtered_df after changes
-                    st.session_state.filtered_df = edited_df.copy()
-                    st.session_state.orders_df = update_orders_df(
-                        st.session_state.orders_df,
-                        edited_df
-                    )
+            if not edited_df.equals(filtered_df):
+                handle_data_editor_changes(edited_df, db)
+                st.session_state.filtered_df = edited_df.copy()
+                st.session_state.orders_df = update_orders_df(
+                    st.session_state.orders_df,
+                    edited_df
+                )
 
             # Statistics and Metrics
             if st.session_state.get('show_stats', False):
