@@ -583,12 +583,7 @@ def product_management_tab():
         st.error("Invalid token")
         return
         
-    products = get_products(
-        access_token=token["access_token"],
-        client_id=CLIENT_ID,
-        client_secret=CLIENT_SECRET,
-        shop_id=SHOP_ID
-    )
+    products = get_products(token["access_token"])
     
     if not products:
         st.info("No products found")

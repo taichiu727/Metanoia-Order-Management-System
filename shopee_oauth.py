@@ -60,7 +60,8 @@ def get_products(access_token):
                     products = data["response"].get("item", [])
                     all_products.extend(products)
                     has_more = data["response"].get("has_next_page", False)
-                    params['offset'] += params['page_size']
+                    if has_more:
+                        params['offset'] = data["response"].get("next_offset", params['offset'] + params['page_size'])
                 else:
                     break
             else:
