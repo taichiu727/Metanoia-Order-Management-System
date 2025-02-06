@@ -249,39 +249,43 @@ def get_products(access_token, client_id, client_secret, shop_id, offset=0, page
         return None
 
 def get_item_base_info(access_token, client_id, client_secret, shop_id, item_ids):
-    timestamp = int(time.time())
-    base_url = "https://partner.shopeemobile.com/api/v2/product/get_item_base_info"
-    path = "/api/v2/product/get_item_base_info"
-    
-    sign = generate_api_signature(
-        api_type='shop',
-        partner_id=client_id,
-        path=path,
-        timestamp=timestamp,
-        access_token=access_token,
-        shop_id=shop_id,
-        client_secret=client_secret
-    )
+   timestamp = int(time.time())
+   base_url = "https://partner.shopeemobile.com/api/v2/product/get_item_base_info"
+   path = "/api/v2/product/get_item_base_info"
+   
+   # Create a comma-separated string of item IDs
+   item_id_list = ','.join(map(str, item_ids))
+   
+   params = {
+       'partner_id': str(client_id),
+       'timestamp': str(timestamp),
+       'access_token': access_token,
+       'shop_id': str(shop_id),
+       'item_id_list': item_id_list
+   }
+   
+   sign = generate_api_signature(
+       api_type='shop',
+       partner_id=client_id,
+       path=path,
+       timestamp=timestamp,
+       access_token=access_token,
+       shop_id=shop_id,
+       client_secret=client_secret
+   )
+   params['sign'] = sign
 
-    params = [
-        ('partner_id', str(client_id)),
-        ('timestamp', str(timestamp)),
-        ('access_token', access_token),
-        ('shop_id', str(shop_id)),
-        ('sign', sign),
-    ]
-    
-    # Add each item_id separately to create correct array parameter
-    for item_id in item_ids:
-        params.append(('item_id_list', str(item_id)))
-
-    try:
-        response = requests.get(base_url, params=params)
-        print(f"URL: {response.url}\nResponse: {response.text}")
-        return response.json() if response.status_code == 200 else None
-    except Exception as e:
-        print(f"Error: {e}")
-        return None
+   try:
+       response = requests.get(base_url, params=params)
+       print(f"URL: {response.url}")
+       print(f"Response: {response.text}")
+       if response.status_code == 200:
+           return response.json()
+       print(f"Status code: {response.status_code}")
+       return None
+   except Exception as e:
+       print(f"Error: {e}")
+       return None
 
 def generate_api_signature(api_type, partner_id, path, timestamp, access_token, shop_id, client_secret):
     """Generate Shopee API signature"""
