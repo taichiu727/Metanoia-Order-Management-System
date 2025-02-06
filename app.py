@@ -689,10 +689,14 @@ def orders_table(filtered_df):
         all_received = all(order_data['Received'])
         status_emoji = "✅" if all_received else "⚠️" if any(order_data['Received']) else "❌"
         
-        with st.expander(f"Order: {order_num} {status_emoji} - Created: {order_data['Created'].iloc[0]} - Deadline: {order_data['Deadline'].iloc[0]}"):
+        with st.expander(f"Order: {order_num} {status_emoji} - Created: {order_data['Created'].iloc[0]} - Deadline: {order_data['Deadline'].iloc[0]}", expanded=True):
             column_config = {
+                "Order Number": st.column_config.TextColumn("Order Number", width="small"),
+                "Created": st.column_config.TextColumn("Created", width="small"),
+                "Deadline": st.column_config.TextColumn("Deadline", width="small"),
                 "Product": st.column_config.TextColumn("Product", width="medium"),
                 "Item Spec": st.column_config.TextColumn("Item Spec", width="small"),
+                "Item Number": st.column_config.TextColumn("Item Number", width="small"),
                 "Quantity": st.column_config.NumberColumn("Quantity", width="small"),
                 "Image": st.column_config.ImageColumn("Image", width="small"),
                 "Received": st.column_config.CheckboxColumn("Received", width="small"),
@@ -700,18 +704,17 @@ def orders_table(filtered_df):
                 "Note": st.column_config.TextColumn("Note", width="medium")
             }
             
-            product_df = order_data[["Product", "Item Spec", "Quantity", "Image", "Received", "Missing", "Note"]]
+            product_df = order_data[["Order Number", "Created", "Deadline", "Product", "Item Spec", "Item Number", "Quantity", "Image", "Received", "Missing", "Note"]]
             edited_df = st.data_editor(
                 product_df,
                 column_config=column_config,
                 use_container_width=True,
                 key=f"order_{order_num}",
                 num_rows="fixed",
-                disabled=["Product", "Item Spec", "Quantity", "Image"]
+                disabled=["Order Number", "Created", "Deadline", "Product", "Item Spec", "Item Number", "Quantity", "Image"]
             )
             
             if edited_df is not None:
-                edited_df['Order Number'] = order_num
                 all_edited_data.append(edited_df)
 
     if all_edited_data:
