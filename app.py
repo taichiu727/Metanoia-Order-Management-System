@@ -257,7 +257,6 @@ def get_products(access_token, client_id, client_secret, shop_id, offset=0, page
         return None
 
 def get_item_base_info(access_token, client_id, client_secret, shop_id, item_ids):
-    """Fetch detailed item information from Shopee API"""
     timestamp = int(time.time())
     
     params = {
@@ -265,7 +264,7 @@ def get_item_base_info(access_token, client_id, client_secret, shop_id, item_ids
         'timestamp': timestamp,
         'access_token': access_token,
         'shop_id': shop_id,
-        'item_id_list': item_ids,
+        'item_id_list': ','.join(map(str, item_ids)),  # Convert to comma-separated string
         'need_tax_info': False,
         'need_complaint_policy': False
     }
@@ -284,16 +283,14 @@ def get_item_base_info(access_token, client_id, client_secret, shop_id, item_ids
     params['sign'] = sign
     url = f"https://partner.shopeemobile.com{path}"
     
-    try:
-        response = requests.get(url, params=params)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            st.error(f"Error fetching item details: {response.text}")
-            return None
-    except Exception as e:
-        st.error(f"Error fetching item details: {str(e)}")
-        return None
+    response = requests.get(url, params=params)
+    print("Base Info Response:", response.text)  # Debug output
+    
+    if response.status_code == 200:
+        return response.json()
+    
+    st.error(f"Error fetching item details: {response.text}")
+    return None
 
 def generate_api_signature(api_type, partner_id, path, timestamp, access_token, shop_id, client_secret):
     """Generate Shopee API signature"""
