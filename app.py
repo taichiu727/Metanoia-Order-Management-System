@@ -85,6 +85,14 @@ class OrderDatabase:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            self.cursor.execute("""
+                CREATE TABLE IF NOT EXISTS product_tags (
+                    item_sku VARCHAR(100),
+                    tag_name TEXT,
+                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (item_sku)
+                )
+            """)
 
             self.conn.commit()
         finally:
@@ -160,6 +168,20 @@ class OrderDatabase:
             self.conn.commit()
         finally:
             self.close()
+    def upsert_product_tag(self, item_sku, tag_name):
+        try:
+            self.connect()
+            self.cursor.execute("""
+                INSERT INTO product_tags (item_sku, tag_name, last_updated)
+                VALUES (%s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT (item_sku) 
+                DO UPDATE SET 
+                    tag_name = EXCLUDED.tag_name,
+                    last_updated = CURRENT_TIMESTAMP
+            """, (item_sku, tag_name))
+            self.conn.commit()
+        finally:
+            self.close()
     def batch_upsert_order_tracking(self, records):
         try:
             self.connect()
@@ -178,6 +200,13 @@ class OrderDatabase:
         except psycopg2.Error as e:
             st.error(f"Database error: {str(e)}")
             raise
+        finally:
+            self.close()
+    def get_product_tags(self):
+        try:
+            self.connect()
+            self.cursor.execute("SELECT item_sku, tag_name FROM product_tags")
+            return {row['item_sku']: row['tag_name'] for row in self.cursor.fetchall()}
         finally:
             self.close()
 
@@ -767,6 +796,12 @@ def orders_table(filtered_df):
     if filtered_df.empty:
         return filtered_df
 
+    # Get product tags
+    db = OrderDatabase()
+    product_tags = db.get_product_tags()
+    # Add tags column
+    filtered_df['Tag'] = filtered_df['Item Number'].map(lambda x: product_tags.get(x, ''))
+
     orders = filtered_df.groupby('Order Number')
     all_edited_data = []
     
@@ -784,19 +819,23 @@ def orders_table(filtered_df):
                 "Item Number": st.column_config.TextColumn("Item Number", width="small"),
                 "Quantity": st.column_config.NumberColumn("Quantity", width="small"),
                 "Image": st.column_config.ImageColumn("Image", width="small"),
+                "Tag": st.column_config.TextColumn("Tag", width="small"),
                 "Received": st.column_config.CheckboxColumn("Received", width="small"),
                 "Missing": st.column_config.NumberColumn("Missing", width="small"),
                 "Note": st.column_config.TextColumn("Note", width="medium")
             }
             
-            product_df = order_data[["Order Number", "Created", "Deadline", "Product", "Item Spec", "Item Number", "Quantity", "Image", "Received", "Missing", "Note"]]
+            product_df = order_data[["Order Number", "Created", "Deadline", "Product", 
+                                   "Item Spec", "Item Number", "Quantity", "Image", 
+                                   "Received", "Missing", "Note", "Tag"]]
             edited_df = st.data_editor(
                 product_df,
                 column_config=column_config,
                 use_container_width=True,
                 key=f"order_{order_num}",
                 num_rows="fixed",
-                disabled=["Order Number", "Created", "Deadline", "Product", "Item Spec", "Item Number", "Quantity", "Image"]
+                disabled=["Order Number", "Created", "Deadline", "Product", 
+                         "Item Spec", "Item Number", "Quantity", "Image", "Tag"]
             )
             
             if edited_df is not None:
@@ -928,7 +967,7 @@ def products_page():
     if not token:
         st.error("Please authenticate first")
         return
-        
+    
     search = st.text_input("🔍 Search products by name or item number", key="product_search")
     
     col1, col2 = st.columns([8, 2])
@@ -938,7 +977,6 @@ def products_page():
         offset = (page - 1) * page_size
     
     with st.spinner("Loading products..."):
-        # First get product list
         products_response = get_products(
             access_token=token["access_token"],
             client_id=CLIENT_ID,
@@ -954,7 +992,6 @@ def products_page():
             total = products_response["response"].get("total_count", 0)
             
             if items:
-                # Get detailed info for all items
                 item_ids = [item["item_id"] for item in items]
                 details_response = get_item_base_info(
                     access_token=token["access_token"],
@@ -965,43 +1002,59 @@ def products_page():
                 )
                 
                 if details_response and "response" in details_response:
-                    item_details = {
-                        item["item_id"]: item 
-                        for item in details_response["response"].get("item_list", [])
-                    }
+                    # Get existing tags
+                    product_tags = db.get_product_tags()
+                    
+                    # Prepare data for table
+                    table_data = []
+                    for item in details_response["response"].get("item_list", []):
+                        price_info = item.get("price_info", [{}])[0]
+                        stock_info = item.get("stock_info_v2", {}).get("summary_info", {})
+                        image_url = item.get("image", {}).get("image_url_list", [""])[0]
+                        
+                        table_data.append({
+                            "Image": image_url,
+                            "Product Name": item.get("item_name", ""),
+                            "SKU": item.get("item_sku", ""),
+                            "Stock": stock_info.get("total_available_stock", 0),
+                            "Price": price_info.get("current_price", 0),
+                            "Status": item.get("item_status", ""),
+                            "Tag": product_tags.get(item.get("item_sku", ""), "")
+                        })
+                    
+                    df = pd.DataFrame(table_data)
                     
                     st.write(f"Showing {len(items)} of {total} products")
                     
-                    cols = st.columns(4)
-                    for idx, item in enumerate(items):
-                        item_detail = item_details.get(item["item_id"], {})
-                        col = cols[idx % 4]
-                        with col:
-                            with st.container():
-                                # Get first image URL if available
-                                image_url = (item_detail.get("image", {})
-                                           .get("image_url_list", [""])[0])
-                                st.image(image_url, use_column_width=True)
-                                
-                                st.write(f"**{item_detail.get('item_name', '')}**")
-                                st.write(f"SKU: {item_detail.get('item_sku', 'N/A')}")
-                                
-                                # Get stock info
-                                stock_info = item_detail.get("stock_info_v2", {})
-                                stock = stock_info.get("summary_info", {}).get("total_available_stock", 0)
-                                st.write(f"Stock: {stock}")
-                                
-                                # Get price info
-                                price_info = item_detail.get("price_info", [{}])[0]
-                                original_price = price_info.get("original_price", 0)
-                                current_price = price_info.get("current_price", original_price)
-                                
-                                if current_price != original_price:
-                                    st.write(f"~~${original_price:.2f}~~ ${current_price:.2f}")
-                                else:
-                                    st.write(f"${original_price:.2f}")
-                                    
-                                st.divider()
+                    # Configure table columns
+                    column_config = {
+                        "Image": st.column_config.ImageColumn("Image", width="small"),
+                        "Product Name": st.column_config.TextColumn("Product Name", width="medium"),
+                        "SKU": st.column_config.TextColumn("SKU", width="small"),
+                        "Stock": st.column_config.NumberColumn("Stock", width="small"),
+                        "Price": st.column_config.NumberColumn("Price", width="small", format="$%.2f"),
+                        "Status": st.column_config.TextColumn("Status", width="small"),
+                        "Tag": st.column_config.TextColumn("Tag", width="small")
+                    }
+                    
+                    edited_df = st.data_editor(
+                        df,
+                        column_config=column_config,
+                        use_container_width=True,
+                        num_rows="fixed",
+                        disabled=["Image", "Product Name", "SKU", "Stock", "Price", "Status"],
+                        key="products_editor"
+                    )
+                    
+                    # Handle tag updates
+                    if "edited_rows" in st.session_state.products_editor:
+                        for idx, changes in st.session_state.products_editor["edited_rows"].items():
+                            if "Tag" in changes:
+                                idx = int(idx)
+                                sku = edited_df.iloc[idx]["SKU"]
+                                new_tag = changes["Tag"]
+                                db.upsert_product_tag(sku, new_tag)
+                                st.toast("✅ Tags updated!")
                     
                     # Pagination
                     total_pages = (total + page_size - 1) // page_size
