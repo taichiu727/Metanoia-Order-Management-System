@@ -211,11 +211,24 @@ class OrderDatabase:
             self.close()
 
 
-def get_products(access_token, client_id, client_secret, shop_id, offset=0, page_size=100, search_keyword=""):
+def get_products(access_token, client_id, client_secret, shop_id, offset=0, page_size=50, search_keyword=""):
+    """Fetch products from Shopee API"""
     timestamp = int(time.time())
-    base_url = "https://partner.shopeemobile.com/api/v2/product/get_item_list"
-    path = "/api/v2/product/get_item_list"
     
+    params = {
+        'partner_id': client_id,
+        'timestamp': timestamp,
+        'access_token': access_token,
+        'shop_id': shop_id,
+        'offset': offset,
+        'page_size': page_size,
+        'item_status': 'NORMAL'
+    }
+    
+    if search_keyword:
+        params['keyword'] = search_keyword
+
+    path = "/api/v2/product/get_item_list"
     sign = generate_api_signature(
         api_type='shop',
         partner_id=client_id,
@@ -226,68 +239,58 @@ def get_products(access_token, client_id, client_secret, shop_id, offset=0, page
         client_secret=client_secret
     )
 
-    params = [
-        ('partner_id', str(client_id)),
-        ('timestamp', str(timestamp)),
-        ('access_token', access_token),
-        ('shop_id', str(shop_id)),
-        ('offset', str(offset)),
-        ('page_size', str(min(page_size, 100))),
-        ('item_status', 'NORMAL'),
-        ('sign', sign)
-    ]
+    params['sign'] = sign
+    url = f"https://partner.shopeemobile.com{path}"
     
-    if search_keyword:
-        params.append(('keyword', search_keyword))
-
     try:
-        response = requests.get(base_url, params=params)
-        print(f"URL: {response.url}\nResponse: {response.text}")
-        return response.json() if response.status_code == 200 else None
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error fetching products: {response.text}")
+            return None
     except Exception as e:
-        print(f"Error: {e}")
+        st.error(f"Error fetching products: {str(e)}")
         return None
 
 def get_item_base_info(access_token, client_id, client_secret, shop_id, item_ids):
-   # Add input validation
-   if not item_ids:
-       print("No item IDs provided")
-       return None
+    """Fetch detailed item information from Shopee API"""
+    timestamp = int(time.time())
+    
+    params = {
+        'partner_id': client_id,
+        'timestamp': timestamp,
+        'access_token': access_token,
+        'shop_id': shop_id,
+        'item_id_list': item_ids,
+        'need_tax_info': False,
+        'need_complaint_policy': False
+    }
 
-   timestamp = int(time.time())
-   base_url = "https://partner.shopeemobile.com/api/v2/product/get_item_base_info"
-   path = "/api/v2/product/get_item_base_info"
-   
-   item_id_list = ','.join(map(str, item_ids))
-   
-   params = {
-       'partner_id': str(client_id),
-       'timestamp': str(timestamp),
-       'access_token': access_token,
-       'shop_id': str(shop_id),
-       'item_id_list': item_id_list
-   }
-   
-   sign = generate_api_signature(...)
-   params['sign'] = sign
+    path = "/api/v2/product/get_item_base_info"
+    sign = generate_api_signature(
+        api_type='shop',
+        partner_id=client_id,
+        path=path,
+        timestamp=timestamp,
+        access_token=access_token,
+        shop_id=shop_id,
+        client_secret=client_secret
+    )
 
-   try:
-       response = requests.get(base_url, params=params)
-       print(f"Full Response Status: {response.status_code}")
-       print(f"Full Response Headers: {response.headers}")
-       print(f"Full Response Text: {response.text}")
-       
-       data = response.json()
-       print(f"API Response Error: {data.get('error')}")
-       print(f"API Response Message: {data.get('message')}")
-       
-       if response.status_code != 200:
-           return None
-       
-       return data
-   except requests.exceptions.RequestException as e:
-       print(f"Network Error: {e}")
-       return None
+    params['sign'] = sign
+    url = f"https://partner.shopeemobile.com{path}"
+    
+    try:
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error fetching item details: {response.text}")
+            return None
+    except Exception as e:
+        st.error(f"Error fetching item details: {str(e)}")
+        return None
 
 def generate_api_signature(api_type, partner_id, path, timestamp, access_token, shop_id, client_secret):
     """Generate Shopee API signature"""
