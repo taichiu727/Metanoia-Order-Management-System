@@ -215,19 +215,16 @@ def get_products(access_token, client_id, client_secret, shop_id, offset=0, page
     timestamp = int(time.time())
     
     params = {
-        'partner_id': client_id,
+        'partner_id': int(client_id),  # Ensure integer
         'timestamp': timestamp,
         'access_token': access_token,
-        'shop_id': shop_id,
+        'shop_id': int(shop_id),       # Ensure integer
         'offset': offset,
-        'page_size': page_size,
-        'item_status': 'NORMAL'  # Changed from list to string
+        'page_size': page_size
     }
     
     if search_keyword:
         params['keyword'] = search_keyword
-
-    print("API Params:", params)  # Add this for debugging
 
     path = "/api/v2/product/get_item_list"
     sign = generate_api_signature(
@@ -243,17 +240,16 @@ def get_products(access_token, client_id, client_secret, shop_id, offset=0, page
     params['sign'] = sign
     url = f"https://partner.shopeemobile.com{path}"
     
-    response = requests.get(url, params=params)
-    print("API Response:", response.text)  # Add this for debugging
-    
-    if response.status_code == 200:
+    try:
+        response = requests.get(url, params=params)
         data = response.json()
-        if "error" in data and data["error"]:
-            st.error(f"API Error: {data.get('error', 'Unknown error')} - {data.get('message', '')}")
+        print("Full Response:", data)  # Debug
+        if data.get("error"):
+            st.error(f"API Error: {data.get('error')} - {data.get('message')}")
             return None
         return data
-    else:
-        st.error(f"HTTP Error: {response.status_code} - {response.text}")
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
         return None
 
 def get_item_base_info(access_token, client_id, client_secret, shop_id, item_ids):
