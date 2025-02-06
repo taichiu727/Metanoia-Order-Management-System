@@ -473,29 +473,6 @@ def on_data_change():
         st.error(f"Error saving changes: {str(e)}")
 
 
-def handle_authentication():
-    """Handle the Shopee authentication flow"""
-    if st.session_state.authentication_state != "complete":
-        st.info("Please authenticate with your Shopee account to continue.")
-        auth_url = get_auth_url()
-        st.markdown(f"[🔐 Authenticate with Shopee]({auth_url})")
-        
-        if "code" in st.query_params:
-            with st.spinner("Authenticating..."):
-                try:
-                    code = st.query_params["code"]
-                    token = fetch_token(code)
-                    #save_token(token)
-                    st.session_state.authentication_state = "complete"
-                    st.query_params.clear()
-                    #st.rerun()
-                except Exception as e:
-                    st.error(f"Authentication failed: {str(e)}")
-                   
-        return False
-    return True
-
-
 def fetch_and_process_orders(token, db):
     """Fetch orders and process them into a DataFrame"""
     with st.spinner("Fetching orders..."):
@@ -628,10 +605,11 @@ def check_token_validity(db):
         return None
     
     current_time = int(time.time())
-    token_age = current_time - token["fetch_time"]
+    expiration_time = token["fetch_time"] + token["expire_in"]
+    time_remaining = expiration_time - current_time
     
-    # If token is expired or close to expiring, try to refresh it
-    if token_age > (token["expire_in"] - 300):  # Refresh if less than 5 minutes remaining
+    # If token expires in less than 5 minutes or is expired, refresh it
+    if time_remaining < 300:
         try:
             new_token_data = refresh_token(token["refresh_token"])
             if new_token_data:
