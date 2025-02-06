@@ -221,7 +221,7 @@ def get_products(access_token, client_id, client_secret, shop_id, offset=0, page
         'shop_id': int(shop_id),
         'offset': offset,
         'page_size': min(page_size, 100),
-        'item_status[]': 'NORMAL'  # Format as array parameter
+        'item_status[]': ['NORMAL','UNLIST']  # Format as array parameter
     }
     
     if search_keyword:
