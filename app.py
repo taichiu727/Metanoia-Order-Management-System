@@ -213,21 +213,9 @@ class OrderDatabase:
 
 def get_products(access_token, client_id, client_secret, shop_id, offset=0, page_size=100, search_keyword=""):
     timestamp = int(time.time())
-    
-    params = {
-        'partner_id': int(client_id),
-        'timestamp': timestamp,
-        'access_token': access_token,
-        'shop_id': int(shop_id),
-        'offset': offset,
-        'page_size': min(page_size, 100),
-        'item_status[]': ['NORMAL','UNLIST']  # Format as array parameter
-    }
-    
-    if search_keyword:
-        params['keyword'] = search_keyword
-
+    base_url = "https://partner.shopeemobile.com/api/v2/product/get_item_list"
     path = "/api/v2/product/get_item_list"
+    
     sign = generate_api_signature(
         api_type='shop',
         partner_id=client_id,
@@ -238,17 +226,26 @@ def get_products(access_token, client_id, client_secret, shop_id, offset=0, page
         client_secret=client_secret
     )
 
-    params['sign'] = sign
+    params = [
+        ('partner_id', str(client_id)),
+        ('timestamp', str(timestamp)),
+        ('access_token', access_token),
+        ('shop_id', str(shop_id)),
+        ('offset', str(offset)),
+        ('page_size', str(min(page_size, 100))),
+        ('item_status', 'NORMAL'),
+        ('sign', sign)
+    ]
     
+    if search_keyword:
+        params.append(('keyword', search_keyword))
+
     try:
-        response = requests.get(
-            "https://partner.shopeemobile.com" + path,
-            params=params
-        )
-        print("Products URL:", response.url)
+        response = requests.get(base_url, params=params)
+        print(f"URL: {response.url}\nResponse: {response.text}")
         return response.json() if response.status_code == 200 else None
     except Exception as e:
-        print(f"Error: {str(e)}")
+        print(f"Error: {e}")
         return None
 
 def get_item_base_info(access_token, client_id, client_secret, shop_id, item_ids):
