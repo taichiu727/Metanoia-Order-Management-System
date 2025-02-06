@@ -220,8 +220,8 @@ def get_products(access_token, client_id, client_secret, shop_id, offset=0, page
         'access_token': access_token,
         'shop_id': int(shop_id),
         'offset': offset,
-        'page_size': min(page_size, 100),  # Max 100 per API docs
-        'item_status[]': ['NORMAL']  # Array parameter format
+        'page_size': min(page_size, 100),
+        'item_status[]': 'NORMAL'  # Format as array parameter
     }
     
     if search_keyword:
@@ -239,15 +239,16 @@ def get_products(access_token, client_id, client_secret, shop_id, offset=0, page
     )
 
     params['sign'] = sign
-    url = f"https://partner.shopeemobile.com{path}"
     
     try:
-        response = requests.get(url, params=params)
-        print("API URL:", response.url)
-        print("Response:", response.text)
-        return response.json()
+        response = requests.get(
+            "https://partner.shopeemobile.com" + path,
+            params=params
+        )
+        print("Products URL:", response.url)
+        return response.json() if response.status_code == 200 else None
     except Exception as e:
-        st.error(f"Error: {str(e)}")
+        print(f"Error: {str(e)}")
         return None
 
 def get_item_base_info(access_token, client_id, client_secret, shop_id, item_ids):
@@ -258,9 +259,7 @@ def get_item_base_info(access_token, client_id, client_secret, shop_id, item_ids
         'timestamp': timestamp,
         'access_token': access_token,
         'shop_id': int(shop_id),
-        'item_id_list': item_ids,  # API expects array directly
-        'need_tax_info': False,
-        'need_complaint_policy': False
+        'item_id_list[]': item_ids,  # Format as array parameter
     }
 
     path = "/api/v2/product/get_item_base_info"
@@ -275,15 +274,17 @@ def get_item_base_info(access_token, client_id, client_secret, shop_id, item_ids
     )
 
     params['sign'] = sign
-    url = f"https://partner.shopeemobile.com{path}"
     
-    response = requests.get(url, params=params)
-    print("Base Info URL:", response.url)
-    print("Response:", response.text)
-    
-    if response.status_code == 200:
-        return response.json()
-    return None
+    try:
+        response = requests.get(
+            "https://partner.shopeemobile.com" + path,
+            params=params
+        )
+        print("Base Info URL:", response.url)
+        return response.json() if response.status_code == 200 else None
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return None
 
 def generate_api_signature(api_type, partner_id, path, timestamp, access_token, shop_id, client_secret):
     """Generate Shopee API signature"""
