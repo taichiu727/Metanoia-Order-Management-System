@@ -958,6 +958,17 @@ def handle_data_editor_changes(edited_df, db):
         st.session_state.last_edited_df = edited_df.copy()
 
 
+def handle_product_table_edits(edited_df, original_df, db):
+    """Handle tag updates with proper data type conversion"""
+    if "edited_rows" in st.session_state.products_editor:
+        for idx, changes in st.session_state.products_editor["edited_rows"].items():
+            if "Tag" in changes:
+                idx = int(idx)
+                sku = edited_df.iloc[idx]["SKU"]
+                new_tag = str(changes["Tag"]) if pd.notna(changes["Tag"]) else ""
+                db.upsert_product_tag(sku, new_tag)
+                st.toast("✅ Tags updated!")
+
 def products_page():
     st.title("📦 Products")
     
@@ -971,7 +982,7 @@ def products_page():
     search = st.text_input("🔍 Search products by name or item number", key="product_search")
     
     with st.spinner("Loading products..."):
-        page_size = 300  # Show 300 products
+        page_size = 300
         products_response = get_products(
             access_token=token["access_token"],
             client_id=CLIENT_ID,
@@ -1004,17 +1015,16 @@ def products_page():
                         price_info = item.get("price_info", [{}])[0]
                         stock_info = item.get("stock_info_v2", {}).get("summary_info", {})
                         image_urls = item.get("image", {}).get("image_url_list", [])
-                        all_images = " | ".join(image_urls) if image_urls else ""
                         
                         table_data.append({
                             "Main Image": image_urls[0] if image_urls else "",
-                            "All Images": all_images,
+                            "All Images": " | ".join(image_urls) if image_urls else "",
                             "Product Name": item.get("item_name", ""),
                             "SKU": item.get("item_sku", ""),
-                            "Stock": stock_info.get("total_available_stock", 0),
-                            "Price": price_info.get("current_price", 0),
-                            "Status": item.get("item_status", ""),
-                            "Tag": product_tags.get(item.get("item_sku", ""), "")
+                            "Stock": int(stock_info.get("total_available_stock", 0)),
+                            "Price": float(price_info.get("current_price", 0)),
+                            "Status": str(item.get("item_status", "")),
+                            "Tag": str(product_tags.get(item.get("item_sku", ""), ""))
                         })
                     
                     df = pd.DataFrame(table_data)
@@ -1041,14 +1051,8 @@ def products_page():
                         key="products_editor"
                     )
                     
-                    if "edited_rows" in st.session_state.products_editor:
-                        for idx, changes in st.session_state.products_editor["edited_rows"].items():
-                            if "Tag" in changes:
-                                idx = int(idx)
-                                sku = edited_df.iloc[idx]["SKU"]
-                                new_tag = changes["Tag"]
-                                db.upsert_product_tag(sku, new_tag)
-                                st.toast("✅ Tags updated!")
+                    handle_product_table_edits(edited_df, df, db)
+                    
                 else:
                     st.error("Failed to fetch product details")
             else:
