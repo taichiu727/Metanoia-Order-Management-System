@@ -679,83 +679,43 @@ def sidebar_controls():
 
 @st.fragment
 def orders_table(filtered_df):
-    """Enhanced orders table with visual grouping and status indicators"""
-    # Add order completion status column
     filtered_df = filtered_df.copy()
-    filtered_df['Status'] = filtered_df.apply(
-        lambda row: '✅ Complete' if row['Received'] and row['Missing'] == 0 
-        else '⚠️ Partial' if row['Received'] 
-        else '❌ Missing', axis=1
+    
+    # Calculate status for each product
+    filtered_df['Product_Status'] = filtered_df.apply(
+        lambda row: 'complete' if row['Received'] and row['Missing'] == 0 
+        else 'partial' if row['Received'] 
+        else 'missing', 
+        axis=1
     )
     
-    # Group by order for visual separation
-    filtered_df['Order Group'] = filtered_df.groupby('Order Number').ngroup()
-
+    # Calculate order completion status
+    order_status = filtered_df.groupby('Order Number').agg({
+        'Product_Status': lambda x: 'All Products Received ✅' if all(x == 'complete')
+                         else 'Partially Received ⚠️' if any(x == 'complete')
+                         else 'No Products Received ❌'
+    }).reset_index()
+    
+    # Merge order status back
+    filtered_df = filtered_df.merge(order_status, on='Order Number', suffixes=('', '_order'))
+    filtered_df = filtered_df.rename(columns={'Product_Status_order': 'Order Status'})
+    
     column_config = {
-        "Order Number": st.column_config.TextColumn(
-            "Order Number",
-            width="small",
-            help="Shopee order number"
-        ),
-        "Created": st.column_config.TextColumn(
-            "Created",
-            width="small",
-            help="Order creation date and time"
-        ),
-        "Status": st.column_config.TextColumn(
-            "Status",
-            width="small",
-            help="Order status"
-        ),
-        "Deadline": st.column_config.TextColumn(
-            "Deadline",
-            width="small",
-            help="Order deadline"
-        ),
-        "Product": st.column_config.TextColumn(
-            "Product",
-            width="small",
-            help="Product name"
-        ),
-        "Quantity": st.column_config.NumberColumn(
-            "Quantity",
-            width="small",
-            help="Ordered quantity"
-        ),
-        "Image": st.column_config.ImageColumn(
-            "Image",
-            width="small",
-            help="Product image"
-        ),
-        "Item Spec": st.column_config.TextColumn(
-            "Item Spec",
-            width="small",
-            help="Item Spec"
-        ),
-        "Item Number": st.column_config.TextColumn(
-            "Item Number",
-            width="small",
-            help="Item Number"
-        ),
-        "Received": st.column_config.CheckboxColumn(
-            "Received",
-            width="small",
-            help="Mark if item has been received"
-        ),
-        "Missing": st.column_config.NumberColumn(
-            "Missing",
-            width="small",
-            help="Number of missing items"
-        ),
-        "Note": st.column_config.TextColumn(
-            "Note",
-            width="medium",
-            help="Additional notes"
-        )
+        "Order Number": st.column_config.TextColumn("Order Number", width="small"),
+        "Order Status": st.column_config.TextColumn("Order Status", width="medium"),
+        "Created": st.column_config.TextColumn("Created", width="small"),
+        "Deadline": st.column_config.TextColumn("Deadline", width="small"),
+        "Product": st.column_config.TextColumn("Product", width="small"),
+        "Quantity": st.column_config.NumberColumn("Quantity", width="small"),
+        "Image": st.column_config.ImageColumn("Image", width="small"),
+        "Item Spec": st.column_config.TextColumn("Item Spec", width="small"),
+        "Item Number": st.column_config.TextColumn("Item Number", width="small"),
+        "Received": st.column_config.CheckboxColumn("Received", width="small"),
+        "Missing": st.column_config.NumberColumn("Missing", width="small"),
+        "Note": st.column_config.TextColumn("Note", width="medium")
     }
 
-    # Hide grouping column
-    display_df = filtered_df.drop(columns=['Order Group'])
+    display_df = filtered_df.drop(columns=['Product_Status'])
 
     edited_df = st.data_editor(
         display_df,
@@ -764,14 +724,8 @@ def orders_table(filtered_df):
         key="orders_editor",
         num_rows="fixed",
         height=st.session_state.viewport_height,
-        disabled=["Order Number", "Created", "Product", "Quantity", "Image", "Item Spec", "Item Number", "Status"]
+        disabled=["Order Number", "Created", "Product", "Quantity", "Image", "Item Spec", "Item Number", "Order Status"]
     )
-
-    # Show order summary
-    if not filtered_df.empty:
-        order_stats = filtered_df.groupby('Order Number')['Status'].agg(lambda x: x.iloc[0]).value_counts()
-        st.markdown("**Order Summary:**")
-        st.write(order_stats)
 
     return edited_df
 
