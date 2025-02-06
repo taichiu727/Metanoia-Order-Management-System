@@ -182,8 +182,93 @@ class OrderDatabase:
             self.close()
 
 
+def get_products(access_token, client_id, client_secret, shop_id, offset=0, page_size=50, search_keyword=""):
+    """Fetch products from Shopee API"""
+    timestamp = int(time.time())
+    
+    params = {
+        'partner_id': client_id,
+        'timestamp': timestamp,
+        'access_token': access_token,
+        'shop_id': shop_id,
+        'offset': offset,
+        'page_size': page_size,
+        'item_status': ['NORMAL', 'UNLIST']  # Include both active and unlisted items
+    }
+    
+    if search_keyword:
+        params['keyword'] = search_keyword
 
+    path = "/api/v2/product/get_item_list"
+    sign = generate_api_signature(
+        api_type='shop',
+        partner_id=client_id,
+        path=path,
+        timestamp=timestamp,
+        access_token=access_token,
+        shop_id=shop_id,
+        client_secret=client_secret
+    )
 
+    params['sign'] = sign
+    url = f"https://partner.shopeemobile.com{path}"
+    
+    try:
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            data = response.json()
+            if "error" in data and data["error"]:
+                st.error(f"API Error: {data.get('error', 'Unknown error')} - {data.get('message', '')}")
+                return None
+            return data
+        else:
+            st.error(f"HTTP Error: {response.status_code} - {response.text}")
+            return None
+    except requests.exceptions.RequestException as e:
+        st.error(f"Network error: {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"Unexpected error: {str(e)}")
+        return None
+
+def get_item_base_info(access_token, client_id, client_secret, shop_id, item_ids):
+    """Fetch detailed item information from Shopee API"""
+    timestamp = int(time.time())
+    
+    params = {
+        'partner_id': client_id,
+        'timestamp': timestamp,
+        'access_token': access_token,
+        'shop_id': shop_id,
+        'item_id_list': item_ids,
+        'need_tax_info': False,
+        'need_complaint_policy': False
+    }
+
+    path = "/api/v2/product/get_item_base_info"
+    sign = generate_api_signature(
+        api_type='shop',
+        partner_id=client_id,
+        path=path,
+        timestamp=timestamp,
+        access_token=access_token,
+        shop_id=shop_id,
+        client_secret=client_secret
+    )
+
+    params['sign'] = sign
+    url = f"https://partner.shopeemobile.com{path}"
+    
+    try:
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error fetching item details: {response.text}")
+            return None
+    except Exception as e:
+        st.error(f"Error fetching item details: {str(e)}")
+        return None
 
 def generate_api_signature(api_type, partner_id, path, timestamp, access_token, shop_id, client_secret):
     """Generate Shopee API signature"""
@@ -833,12 +918,120 @@ def handle_data_editor_changes(edited_df, db):
     else:
         st.session_state.last_edited_df = edited_df.copy()
 
+
+def products_page():
+    st.title("📦 Products")
+    
+    db = OrderDatabase()
+    token = db.load_token()
+    
+    if not token:
+        st.error("Please authenticate first")
+        return
+        
+    search = st.text_input("🔍 Search products by name or item number", key="product_search")
+    
+    col1, col2 = st.columns([8, 2])
+    with col2:
+        page_size = 50
+        page = st.number_input("Page", min_value=1, value=1, key="product_page")
+        offset = (page - 1) * page_size
+    
+    with st.spinner("Loading products..."):
+        # First get product list
+        products_response = get_products(
+            access_token=token["access_token"],
+            client_id=CLIENT_ID,
+            client_secret=CLIENT_SECRET,
+            shop_id=SHOP_ID,
+            offset=offset,
+            page_size=page_size,
+            search_keyword=search
+        )
+    
+        if products_response and "response" in products_response:
+            items = products_response["response"].get("item", [])
+            total = products_response["response"].get("total_count", 0)
+            
+            if items:
+                # Get detailed info for all items
+                item_ids = [item["item_id"] for item in items]
+                details_response = get_item_base_info(
+                    access_token=token["access_token"],
+                    client_id=CLIENT_ID,
+                    client_secret=CLIENT_SECRET,
+                    shop_id=SHOP_ID,
+                    item_ids=item_ids
+                )
+                
+                if details_response and "response" in details_response:
+                    item_details = {
+                        item["item_id"]: item 
+                        for item in details_response["response"].get("item_list", [])
+                    }
+                    
+                    st.write(f"Showing {len(items)} of {total} products")
+                    
+                    cols = st.columns(4)
+                    for idx, item in enumerate(items):
+                        item_detail = item_details.get(item["item_id"], {})
+                        col = cols[idx % 4]
+                        with col:
+                            with st.container():
+                                # Get first image URL if available
+                                image_url = (item_detail.get("image", {})
+                                           .get("image_url_list", [""])[0])
+                                st.image(image_url, use_column_width=True)
+                                
+                                st.write(f"**{item_detail.get('item_name', '')}**")
+                                st.write(f"SKU: {item_detail.get('item_sku', 'N/A')}")
+                                
+                                # Get stock info
+                                stock_info = item_detail.get("stock_info_v2", {})
+                                stock = stock_info.get("summary_info", {}).get("total_available_stock", 0)
+                                st.write(f"Stock: {stock}")
+                                
+                                # Get price info
+                                price_info = item_detail.get("price_info", [{}])[0]
+                                original_price = price_info.get("original_price", 0)
+                                current_price = price_info.get("current_price", original_price)
+                                
+                                if current_price != original_price:
+                                    st.write(f"~~${original_price:.2f}~~ ${current_price:.2f}")
+                                else:
+                                    st.write(f"${original_price:.2f}")
+                                    
+                                st.divider()
+                    
+                    # Pagination
+                    total_pages = (total + page_size - 1) // page_size
+                    cols = st.columns(5)
+                    with cols[1]:
+                        if st.button("⬅️ Previous", disabled=page==1):
+                            st.session_state.product_page = max(1, page - 1)
+                            st.rerun()
+                    with cols[3]:
+                        if st.button("Next ➡️", disabled=page >= total_pages):
+                            st.session_state.product_page = min(total_pages, page + 1)
+                            st.rerun()
+                else:
+                    st.error("Failed to fetch product details")
+            else:
+                st.info("No products found")
+        else:
+            st.error("Failed to fetch products")
+
 def main():
     st.set_page_config(page_title="Order Management", layout="wide")
     
     db = OrderDatabase()
     db.init_tables()
     initialize_session_state()
+
+    if "product_page" not in st.session_state:
+        st.session_state.product_page = 1
+    if "product_search" not in st.session_state:
+        st.session_state.product_search = ""
 
     st.title("📦 Order Management")
     
@@ -857,27 +1050,33 @@ def main():
     with st.sidebar:
         sidebar_controls()
 
-    # Fetch and process orders if needed
-    if st.session_state.orders_need_refresh:
-        st.session_state.orders_df = fetch_and_process_orders(token, db)
-        st.session_state.orders_need_refresh = False
+    tab1, tab2 = st.tabs(["Orders", "Products"])
+    
+    with tab1:
+        # Fetch and process orders if needed
+        if st.session_state.orders_need_refresh:
+            st.session_state.orders_df = fetch_and_process_orders(token, db)
+            st.session_state.orders_need_refresh = False
 
-    if not st.session_state.orders_df.empty:
-        # Apply filters based on session state
-        filtered_df = apply_filters(
-            st.session_state.orders_df, 
-            st.session_state.get('status_filter', 'All'),
-            st.session_state.get('show_preorders', False)
-        )
-        
-        # Use fragments for main UI components
-        edited_df = orders_table(filtered_df)
-        statistics_view(edited_df)
-        
-        st.divider()
-        export_controls(edited_df)
-    else:
-        st.info("No orders found in the selected time range.")
+        if not st.session_state.orders_df.empty:
+            # Apply filters based on session state
+            filtered_df = apply_filters(
+                st.session_state.orders_df, 
+                st.session_state.get('status_filter', 'All'),
+                st.session_state.get('show_preorders', False)
+            )
+            
+            # Use fragments for main UI components
+            edited_df = orders_table(filtered_df)
+            statistics_view(edited_df)
+            
+            st.divider()
+            export_controls(edited_df)
+        else:
+            st.info("No orders found in the selected time range.")
+    
+    with tab2:
+        products_page()
 
 if __name__ == "__main__":
     main()
