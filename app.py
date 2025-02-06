@@ -679,55 +679,49 @@ def sidebar_controls():
 
 @st.fragment
 def orders_table(filtered_df):
-    filtered_df = filtered_df.copy()
-    
-    # Calculate status for each product
-    filtered_df['Product_Status'] = filtered_df.apply(
-        lambda row: 'complete' if row['Received'] and row['Missing'] == 0 
-        else 'partial' if row['Received'] 
-        else 'missing', 
-        axis=1
-    )
-    
-    # Calculate order completion status
-    order_status = filtered_df.groupby('Order Number').agg({
-        'Product_Status': lambda x: 'All Products Received ✅' if all(x == 'complete')
-                         else 'Partially Received ⚠️' if any(x == 'complete')
-                         else 'No Products Received ❌'
-    }).reset_index()
-    
-    # Merge order status back
-    filtered_df = filtered_df.merge(order_status, on='Order Number', suffixes=('', '_order'))
-    filtered_df = filtered_df.rename(columns={'Product_Status_order': 'Order Status'})
-    
-    column_config = {
-        "Order Number": st.column_config.TextColumn("Order Number", width="small"),
-        "Order Status": st.column_config.TextColumn("Order Status", width="medium"),
-        "Created": st.column_config.TextColumn("Created", width="small"),
-        "Deadline": st.column_config.TextColumn("Deadline", width="small"),
-        "Product": st.column_config.TextColumn("Product", width="small"),
-        "Quantity": st.column_config.NumberColumn("Quantity", width="small"),
-        "Image": st.column_config.ImageColumn("Image", width="small"),
-        "Item Spec": st.column_config.TextColumn("Item Spec", width="small"),
-        "Item Number": st.column_config.TextColumn("Item Number", width="small"),
-        "Received": st.column_config.CheckboxColumn("Received", width="small"),
-        "Missing": st.column_config.NumberColumn("Missing", width="small"),
-        "Note": st.column_config.TextColumn("Note", width="medium")
-    }
+    if filtered_df.empty:
+        return filtered_df
 
-    display_df = filtered_df.drop(columns=['Product_Status'])
+    orders = filtered_df.groupby('Order Number')
+    all_edited_data = []
+    
+    for order_num, order_data in orders:
+        all_received = all(order_data['Received'])
+        status_emoji = "✅" if all_received else "⚠️" if any(order_data['Received']) else "❌"
+        
+        with st.expander(f"Order: {order_num} {status_emoji} - Created: {order_data['Created'].iloc[0]} - Deadline: {order_data['Deadline'].iloc[0]}"):
+            column_config = {
+                "Product": st.column_config.TextColumn("Product", width="medium"),
+                "Item Spec": st.column_config.TextColumn("Item Spec", width="small"),
+                "Quantity": st.column_config.NumberColumn("Quantity", width="small"),
+                "Image": st.column_config.ImageColumn("Image", width="small"),
+                "Received": st.column_config.CheckboxColumn("Received", width="small"),
+                "Missing": st.column_config.NumberColumn("Missing", width="small"),
+                "Note": st.column_config.TextColumn("Note", width="medium")
+            }
+            
+            product_df = order_data[["Product", "Item Spec", "Quantity", "Image", "Received", "Missing", "Note"]]
+            edited_df = st.data_editor(
+                product_df,
+                column_config=column_config,
+                use_container_width=True,
+                key=f"order_{order_num}",
+                num_rows="fixed",
+                disabled=["Product", "Item Spec", "Quantity", "Image"]
+            )
+            
+            if edited_df is not None:
+                edited_df['Order Number'] = order_num
+                all_edited_data.append(edited_df)
 
-    edited_df = st.data_editor(
-        display_df,
-        column_config=column_config,
-        use_container_width=True,
-        key="orders_editor",
-        num_rows="fixed",
-        height=st.session_state.viewport_height,
-        disabled=["Order Number", "Created", "Product", "Quantity", "Image", "Item Spec", "Item Number", "Order Status"]
-    )
+    if all_edited_data:
+        combined_edits = pd.concat(all_edited_data)
+        filtered_df = filtered_df.copy()
+        for idx, row in combined_edits.iterrows():
+            mask = (filtered_df['Order Number'] == row['Order Number']) & (filtered_df['Product'] == row['Product'])
+            filtered_df.loc[mask, ['Received', 'Missing', 'Note']] = row[['Received', 'Missing', 'Note']]
 
-    return edited_df
+    return filtered_df
 
 @st.fragment
 def statistics_view(df):
