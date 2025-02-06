@@ -796,10 +796,8 @@ def orders_table(filtered_df):
     if filtered_df.empty:
         return filtered_df
 
-    # Get product tags
     db = OrderDatabase()
     product_tags = db.get_product_tags()
-    # Add tags column
     filtered_df['Tag'] = filtered_df['Item Number'].map(lambda x: product_tags.get(x, ''))
 
     orders = filtered_df.groupby('Order Number')
@@ -809,7 +807,7 @@ def orders_table(filtered_df):
         all_received = all(order_data['Received'])
         status_emoji = "✅" if all_received else "⚠️" if any(order_data['Received']) else "❌"
         
-        with st.expander(f"Order: {order_num} {status_emoji} - Created: {order_data['Created'].iloc[0]} - Deadline: {order_data['Deadline'].iloc[0]}", expanded=True):
+        with st.expander(f"Order: {order_num} {status_emoji}", expanded=True):
             column_config = {
                 "Order Number": st.column_config.TextColumn("Order Number", width="small"),
                 "Created": st.column_config.TextColumn("Created", width="small"),
@@ -820,9 +818,9 @@ def orders_table(filtered_df):
                 "Quantity": st.column_config.NumberColumn("Quantity", width="small"),
                 "Image": st.column_config.ImageColumn("Image", width="small"),
                 "Tag": st.column_config.TextColumn("Tag", width="small"),
-                "Received": st.column_config.CheckboxColumn("Received", width="small"),
-                "Missing": st.column_config.NumberColumn("Missing", width="small"),
-                "Note": st.column_config.TextColumn("Note", width="medium")
+                "Received": st.column_config.CheckboxColumn("Received", width="small", default=False),
+                "Missing": st.column_config.NumberColumn("Missing", width="small", default=0),
+                "Note": st.column_config.TextColumn("Note", width="medium", default="")
             }
             
             product_df = order_data[["Order Number", "Created", "Deadline", "Product", 
@@ -846,7 +844,9 @@ def orders_table(filtered_df):
         filtered_df = filtered_df.copy()
         for idx, row in combined_edits.iterrows():
             mask = (filtered_df['Order Number'] == row['Order Number']) & (filtered_df['Product'] == row['Product'])
-            filtered_df.loc[mask, ['Received', 'Missing', 'Note']] = row[['Received', 'Missing', 'Note']]
+            filtered_df.loc[mask, 'Received'] = row['Received'] if pd.notna(row['Received']) else False
+            filtered_df.loc[mask, 'Missing'] = row['Missing'] if pd.notna(row['Missing']) else 0
+            filtered_df.loc[mask, 'Note'] = row['Note'] if pd.notna(row['Note']) else ""
 
     return filtered_df
 
