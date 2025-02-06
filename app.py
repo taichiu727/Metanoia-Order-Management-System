@@ -679,8 +679,35 @@ def sidebar_controls():
 
 @st.fragment
 def orders_table(filtered_df):
-    """Fragment for the orders data editor"""
-
+    """Enhanced orders table with visual grouping and status indicators"""
+    # Add status column for color coding
+    filtered_df = filtered_df.copy()
+    filtered_df['_order_status'] = filtered_df.apply(
+        lambda row: 'complete' if row['Received'] and row['Missing'] == 0 
+        else 'partial' if row['Received'] 
+        else 'missing', axis=1
+    )
+    
+    # Group by order and compute order completion status
+    order_status = filtered_df.groupby('Order Number').apply(
+        lambda g: 'complete' if all(g['_order_status'] == 'complete')
+        else 'partial' if any(g['_order_status'] != 'missing')
+        else 'missing'
+    ).to_dict()
+    
+    # Add order row styling
+    filtered_df['_style'] = filtered_df.apply(
+        lambda row: {
+            'background-color': (
+                '#e6ffe6' if row['_order_status'] == 'complete'  # Light green
+                else '#fff3e6' if row['_order_status'] == 'partial'  # Light orange
+                else '#ffe6e6'  # Light red
+            ),
+            'border-top': '2px solid #666' if row.name == 0 or 
+                         filtered_df.iloc[row.name-1]['Order Number'] != row['Order Number']
+                         else None
+        }, axis=1
+    )
 
     column_config = {
         "Order Number": st.column_config.TextColumn(
@@ -740,21 +767,38 @@ def orders_table(filtered_df):
         )
     }
 
+    # Hide status columns from display
+    hide_cols = ['_order_status', '_style']
+    display_df = filtered_df.drop(columns=hide_cols)
+
     edited_df = st.data_editor(
-        filtered_df,
+        display_df,
         column_config=column_config,
         use_container_width=True,
         key="orders_editor",
         num_rows="fixed",
         height=st.session_state.viewport_height,
-        disabled=["Order Number", "Created", "Product", "Quantity", "Image", "Item Spec", "Item Number"]
+        disabled=["Order Number", "Created", "Product", "Quantity", "Image", "Item Spec", "Item Number"],
+        style=filtered_df['_style'].to_dict()
     )
 
-    # Check if there are changes
-    if edited_df is not None and not edited_df.equals(filtered_df):
-        # Handle the changes directly here instead of calling st.rerun
-        db = OrderDatabase()
-        handle_data_editor_changes(edited_df, db)
+    # Add summary indicators
+    if not filtered_df.empty:
+        order_summary = filtered_df.groupby('Order Number').agg({
+            '_order_status': lambda x: 'complete' if all(x == 'complete') 
+                           else 'partial' if any(x != 'missing') else 'missing'
+        })
+        
+        total_orders = len(order_summary)
+        complete_orders = sum(order_summary['_order_status'] == 'complete')
+        partial_orders = sum(order_summary['_order_status'] == 'partial')
+        
+        st.markdown(f"""
+        **Order Status Summary:**
+        - 🟢 Complete: {complete_orders}/{total_orders}
+        - 🟡 Partial: {partial_orders}/{total_orders}
+        - 🔴 Missing: {total_orders - complete_orders - partial_orders}/{total_orders}
+        """)
 
     return edited_df
 
