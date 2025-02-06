@@ -249,11 +249,15 @@ def get_products(access_token, client_id, client_secret, shop_id, offset=0, page
         return None
 
 def get_item_base_info(access_token, client_id, client_secret, shop_id, item_ids):
+   # Add input validation
+   if not item_ids:
+       print("No item IDs provided")
+       return None
+
    timestamp = int(time.time())
    base_url = "https://partner.shopeemobile.com/api/v2/product/get_item_base_info"
    path = "/api/v2/product/get_item_base_info"
    
-   # Create a comma-separated string of item IDs
    item_id_list = ','.join(map(str, item_ids))
    
    params = {
@@ -264,27 +268,25 @@ def get_item_base_info(access_token, client_id, client_secret, shop_id, item_ids
        'item_id_list': item_id_list
    }
    
-   sign = generate_api_signature(
-       api_type='shop',
-       partner_id=client_id,
-       path=path,
-       timestamp=timestamp,
-       access_token=access_token,
-       shop_id=shop_id,
-       client_secret=client_secret
-   )
+   sign = generate_api_signature(...)
    params['sign'] = sign
 
    try:
        response = requests.get(base_url, params=params)
-       print(f"URL: {response.url}")
-       print(f"Response: {response.text}")
-       if response.status_code == 200:
-           return response.json()
-       print(f"Status code: {response.status_code}")
-       return None
-   except Exception as e:
-       print(f"Error: {e}")
+       print(f"Full Response Status: {response.status_code}")
+       print(f"Full Response Headers: {response.headers}")
+       print(f"Full Response Text: {response.text}")
+       
+       data = response.json()
+       print(f"API Response Error: {data.get('error')}")
+       print(f"API Response Message: {data.get('message')}")
+       
+       if response.status_code != 200:
+           return None
+       
+       return data
+   except requests.exceptions.RequestException as e:
+       print(f"Network Error: {e}")
        return None
 
 def generate_api_signature(api_type, partner_id, path, timestamp, access_token, shop_id, client_secret):
