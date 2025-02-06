@@ -211,16 +211,18 @@ class OrderDatabase:
             self.close()
 
 
-def get_products(access_token, client_id, client_secret, shop_id, offset=0, page_size=300, search_keyword=""):
+def get_products(access_token, client_id, client_secret, shop_id, offset=0, page_size=50, search_keyword=""):
+    """Fetch products from Shopee API"""
     timestamp = int(time.time())
     
     params = {
-        'partner_id': int(client_id),  # Ensure integer
+        'partner_id': client_id,
         'timestamp': timestamp,
         'access_token': access_token,
-        'shop_id': int(shop_id),       # Ensure integer
+        'shop_id': shop_id,
         'offset': offset,
-        'page_size': page_size
+        'page_size': page_size,
+        'item_status': 'NORMAL'  # Include both active and unlisted items
     }
     
     if search_keyword:
@@ -242,17 +244,24 @@ def get_products(access_token, client_id, client_secret, shop_id, offset=0, page
     
     try:
         response = requests.get(url, params=params)
-        data = response.json()
-        print("Full Response:", data)  # Debug
-        if data.get("error"):
-            st.error(f"API Error: {data.get('error')} - {data.get('message')}")
+        if response.status_code == 200:
+            data = response.json()
+            if "error" in data and data["error"]:
+                st.error(f"API Error: {data.get('error', 'Unknown error')} - {data.get('message', '')}")
+                return None
+            return data
+        else:
+            st.error(f"HTTP Error: {response.status_code} - {response.text}")
             return None
-        return data
+    except requests.exceptions.RequestException as e:
+        st.error(f"Network error: {str(e)}")
+        return None
     except Exception as e:
-        st.error(f"Error: {str(e)}")
+        st.error(f"Unexpected error: {str(e)}")
         return None
 
 def get_item_base_info(access_token, client_id, client_secret, shop_id, item_ids):
+    """Fetch detailed item information from Shopee API"""
     timestamp = int(time.time())
     
     params = {
@@ -260,7 +269,7 @@ def get_item_base_info(access_token, client_id, client_secret, shop_id, item_ids
         'timestamp': timestamp,
         'access_token': access_token,
         'shop_id': shop_id,
-        'item_id_list': ','.join(map(str, item_ids)),  # Convert to comma-separated string
+        'item_id_list': item_ids,
         'need_tax_info': False,
         'need_complaint_policy': False
     }
@@ -279,14 +288,16 @@ def get_item_base_info(access_token, client_id, client_secret, shop_id, item_ids
     params['sign'] = sign
     url = f"https://partner.shopeemobile.com{path}"
     
-    response = requests.get(url, params=params)
-    print("Base Info Response:", response.text)  # Debug output
-    
-    if response.status_code == 200:
-        return response.json()
-    
-    st.error(f"Error fetching item details: {response.text}")
-    return None
+    try:
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error fetching item details: {response.text}")
+            return None
+    except Exception as e:
+        st.error(f"Error fetching item details: {str(e)}")
+        return None
 
 def generate_api_signature(api_type, partner_id, path, timestamp, access_token, shop_id, client_secret):
     """Generate Shopee API signature"""
