@@ -1033,6 +1033,126 @@ def handle_product_table_edits(edited_df, original_df, db):
                 db.upsert_product_tag(sku, new_tag)
                 st.toast("✅ Tags updated!")
 
+@st.fragment 
+def products_table(access_token, client_id, client_secret, shop_id, search_keyword, page, page_size):
+    """Fragment for the products table"""
+    db = OrderDatabase()
+    offset = (page - 1) * page_size
+    
+    with st.spinner("Loading products..."):
+        products_response = get_products(
+            access_token=access_token,
+            client_id=client_id,
+            client_secret=client_secret,
+            shop_id=shop_id,
+            offset=offset,
+            page_size=page_size,
+            search_keyword=search_keyword
+        )
+    
+        if not products_response or "response" not in products_response:
+            st.error("Failed to fetch products")
+            return None, 0
+            
+        items = products_response["response"].get("item", [])
+        total = products_response["response"].get("total_count", 0)
+        
+        if not items:
+            st.info("No products found")
+            return None, 0
+            
+        item_ids = [item["item_id"] for item in items]
+        details_response = get_item_base_info(
+            access_token=access_token,
+            client_id=client_id,
+            client_secret=client_secret,
+            shop_id=shop_id,
+            item_ids=item_ids
+        )
+        
+        if not details_response or "response" not in details_response:
+            st.error("Failed to fetch product details")
+            return None, 0
+            
+        # Get existing tags
+        product_tags = db.get_product_tags()
+        
+        # Prepare data for table
+        table_data = []
+        for item in details_response["response"].get("item_list", []):
+            price_info = item.get("price_info", [{}])[0]
+            stock_info = item.get("stock_info_v2", {}).get("summary_info", {})
+            image_url = item.get("image", {}).get("image_url_list", [""])[0]
+            
+            table_data.append({
+                "Image": image_url,
+                "Product Name": item.get("item_name", ""),
+                "SKU": item.get("item_sku", ""),
+                "Stock": stock_info.get("total_available_stock", 0),
+                "Price": price_info.get("current_price", 0),
+                "Status": item.get("item_status", ""),
+                "Tag": product_tags.get(item.get("item_sku", ""), "")
+            })
+        
+        df = pd.DataFrame(table_data)
+        return df, total
+
+@st.fragment
+def product_table_editor(df):
+    """Fragment for the product table editor"""
+    if df is None:
+        return
+        
+    column_config = {
+        "Image": st.column_config.ImageColumn("Image", width="small"),
+        "Product Name": st.column_config.TextColumn("Product Name", width="medium"),
+        "SKU": st.column_config.TextColumn("SKU", width="small"),
+        "Stock": st.column_config.NumberColumn("Stock", width="small"),
+        "Price": st.column_config.NumberColumn("Price", width="small", format="$%.2f"),
+        "Status": st.column_config.TextColumn("Status", width="small"),
+        "Tag": st.column_config.TextColumn("Tag", width="small")
+    }
+    
+    edited_df = st.data_editor(
+        df,
+        column_config=column_config,
+        use_container_width=True,
+        num_rows="fixed",
+        disabled=["Image", "Product Name", "SKU", "Stock", "Price", "Status"],
+        key="products_editor"
+    )
+    
+    if "edited_rows" in st.session_state.products_editor:
+        db = OrderDatabase()
+        for idx, changes in st.session_state.products_editor["edited_rows"].items():
+            if "Tag" in changes:
+                idx = int(idx)
+                sku = edited_df.iloc[idx]["SKU"]
+                new_tag = str(changes["Tag"]) if pd.notna(changes["Tag"]) else ""
+                db.upsert_product_tag(sku, new_tag)
+        
+        if st.session_state.products_editor["edited_rows"]:
+            st.toast("✅ Tags updated!")
+
+@st.fragment
+def pagination_controls(current_page, total_items, page_size):
+    """Fragment for pagination controls"""
+    total_pages = (total_items + page_size - 1) // page_size
+    cols = st.columns(5)
+    
+    with cols[1]:
+        if st.button("⬅️ Previous", disabled=current_page==1):
+            st.session_state.product_page = max(1, current_page - 1)
+            st.rerun()
+    
+    with cols[2]:
+        st.write(f"Page {current_page} of {total_pages}")
+        
+    with cols[3]:
+        if st.button("Next ➡️", disabled=current_page >= total_pages):
+            st.session_state.product_page = min(total_pages, current_page + 1)
+            st.rerun()
+
 def products_page():
     st.title("📦 Products")
     
@@ -1045,109 +1165,28 @@ def products_page():
     
     search = st.text_input("🔍 Search products by name or item number", key="product_search")
     
-    col1, col2 = st.columns([8, 2])
-    with col2:
-        page_size = 50
-        page = st.number_input("Page", min_value=1, value=1, key="product_page")
-        offset = (page - 1) * page_size
+    page_size = 50
+    page = st.session_state.get("product_page", 1)
     
-    with st.spinner("Loading products..."):
-        products_response = get_products(
-            access_token=token["access_token"],
-            client_id=CLIENT_ID,
-            client_secret=CLIENT_SECRET,
-            shop_id=SHOP_ID,
-            offset=offset,
-            page_size=page_size,
-            search_keyword=search
-        )
+    # Get products data using fragment
+    df, total_items = products_table(
+        token["access_token"],
+        CLIENT_ID,
+        CLIENT_SECRET,
+        SHOP_ID,
+        search,
+        page,
+        page_size
+    )
     
-        if products_response and "response" in products_response:
-            items = products_response["response"].get("item", [])
-            total = products_response["response"].get("total_count", 0)
-            
-            if items:
-                item_ids = [item["item_id"] for item in items]
-                details_response = get_item_base_info(
-                    access_token=token["access_token"],
-                    client_id=CLIENT_ID,
-                    client_secret=CLIENT_SECRET,
-                    shop_id=SHOP_ID,
-                    item_ids=item_ids
-                )
-                
-                if details_response and "response" in details_response:
-                    # Get existing tags
-                    product_tags = db.get_product_tags()
-                    
-                    # Prepare data for table
-                    table_data = []
-                    for item in details_response["response"].get("item_list", []):
-                        price_info = item.get("price_info", [{}])[0]
-                        stock_info = item.get("stock_info_v2", {}).get("summary_info", {})
-                        image_url = item.get("image", {}).get("image_url_list", [""])[0]
-                        
-                        table_data.append({
-                            "Image": image_url,
-                            "Product Name": item.get("item_name", ""),
-                            "SKU": item.get("item_sku", ""),
-                            "Stock": stock_info.get("total_available_stock", 0),
-                            "Price": price_info.get("current_price", 0),
-                            "Status": item.get("item_status", ""),
-                            "Tag": product_tags.get(item.get("item_sku", ""), "")
-                        })
-                    
-                    df = pd.DataFrame(table_data)
-                    
-                    st.write(f"Showing {len(items)} of {total} products")
-                    
-                    # Configure table columns
-                    column_config = {
-                        "Image": st.column_config.ImageColumn("Image", width="small"),
-                        "Product Name": st.column_config.TextColumn("Product Name", width="medium"),
-                        "SKU": st.column_config.TextColumn("SKU", width="small"),
-                        "Stock": st.column_config.NumberColumn("Stock", width="small"),
-                        "Price": st.column_config.NumberColumn("Price", width="small", format="$%.2f"),
-                        "Status": st.column_config.TextColumn("Status", width="small"),
-                        "Tag": st.column_config.TextColumn("Tag", width="small")
-                    }
-                    
-                    edited_df = st.data_editor(
-                        df,
-                        column_config=column_config,
-                        use_container_width=True,
-                        num_rows="fixed",
-                        disabled=["Image", "Product Name", "SKU", "Stock", "Price", "Status"],
-                        key="products_editor"
-                    )
-                    
-                    # Handle tag updates
-                    if "edited_rows" in st.session_state.products_editor:
-                        for idx, changes in st.session_state.products_editor["edited_rows"].items():
-                            if "Tag" in changes:
-                                idx = int(idx)
-                                sku = edited_df.iloc[idx]["SKU"]
-                                new_tag = changes["Tag"]
-                                db.upsert_product_tag(sku, new_tag)
-                                st.toast("✅ Tags updated!")
-                    
-                    # Pagination
-                    total_pages = (total + page_size - 1) // page_size
-                    cols = st.columns(5)
-                    with cols[1]:
-                        if st.button("⬅️ Previous", disabled=page==1):
-                            st.session_state.product_page = max(1, page - 1)
-                            st.rerun()
-                    with cols[3]:
-                        if st.button("Next ➡️", disabled=page >= total_pages):
-                            st.session_state.product_page = min(total_pages, page + 1)
-                            st.rerun()
-                else:
-                    st.error("Failed to fetch product details")
-            else:
-                st.info("No products found")
-        else:
-            st.error("Failed to fetch products")
+    if df is not None:
+        st.write(f"Showing {len(df)} of {total_items} products")
+        
+        # Display and handle product table editing using fragment
+        product_table_editor(df)
+        
+        # Handle pagination using fragment
+        pagination_controls(page, total_items, page_size)
 
 def main():
     st.set_page_config(page_title="Order Management", layout="wide")
