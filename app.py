@@ -1006,49 +1006,58 @@ def handle_data_editor_changes(edited_df, db):
 
 
 
-@st.cache_data(ttl=300)  # Cache for 5 minutes
+@st.cache_data(ttl=300)
 def fetch_all_products(access_token, client_id, client_secret, shop_id):
     """Fetch all products with pagination handling"""
     all_items = []
     page_size = 100  # Maximum allowed by Shopee API
     offset = 0
     
-    while True:
-        with st.spinner(f"Loading products... ({len(all_items)} loaded)"):
-            products_response = get_products(
-                access_token=access_token,
-                client_id=client_id,
-                client_secret=client_secret,
-                shop_id=shop_id,
-                offset=offset,
-                page_size=page_size
-            )
-            
-            if not products_response or "response" not in products_response:
-                break
-                
-            items = products_response["response"].get("item", [])
-            if not items:
-                break
-                
-            # Get details for this batch
-            item_ids = [item["item_id"] for item in items]
-            details_response = get_item_base_info(
-                access_token=access_token,
-                client_id=client_id,
-                client_secret=client_secret,
-                shop_id=shop_id,
-                item_ids=item_ids
-            )
-            
-            if details_response and "response" in details_response:
-                all_items.extend(details_response["response"].get("item_list", []))
-            
-            if len(items) < page_size:
-                break
-                
-            offset += page_size
-            time.sleep(0.5)  # Prevent rate limiting
+    # First API call debug
+    st.write("Debug: Making first API call to get_products")
+    products_response = get_products(
+        access_token=access_token,
+        client_id=client_id,
+        client_secret=client_secret,
+        shop_id=shop_id,
+        offset=offset,
+        page_size=page_size
+    )
+    
+    st.write(f"Debug: Initial products_response: {products_response}")
+    
+    if not products_response or "response" not in products_response:
+        st.error("Failed to get products response")
+        return []
+        
+    items = products_response["response"].get("item", [])
+    st.write(f"Debug: Found {len(items)} items in first page")
+    
+    if not items:
+        st.warning("No items found in the shop")
+        return []
+        
+    # Get first batch details
+    item_ids = [item["item_id"] for item in items]
+    st.write(f"Debug: Getting details for {len(item_ids)} items")
+    
+    details_response = get_item_base_info(
+        access_token=access_token,
+        client_id=client_id,
+        client_secret=client_secret,
+        shop_id=shop_id,
+        item_ids=item_ids
+    )
+    
+    st.write(f"Debug: details_response received: {bool(details_response)}")
+    
+    if details_response and "response" in details_response:
+        batch_items = details_response["response"].get("item_list", [])
+        all_items.extend(batch_items)
+        st.write(f"Debug: Successfully added {len(batch_items)} items")
+    else:
+        st.error("Failed to get item details")
+        return []
     
     return all_items
 
