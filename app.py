@@ -1120,21 +1120,29 @@ def on_tag_change(edited_rows, current_df, db):
         st.toast("✅ Tags updated!")
 
 @st.fragment
-def products_table(df, db, page_size=100):
+def products_table(df, db):
     """Fragment for displaying products table with pagination"""
     if df is None or df.empty:
         st.info("No products loaded yet.")
         return
 
+    # Calculate pagination
+    page_size = 100
     total_items = len(df)
-    page = st.session_state.product_page
+    total_pages = (total_items + page_size - 1) // page_size
+    current_page = st.session_state.get('product_page', 1)
     
-    # Apply pagination
-    start_idx = (page - 1) * page_size
+    # Ensure current page is valid
+    current_page = max(1, min(current_page, total_pages))
+    
+    # Calculate slice indices
+    start_idx = (current_page - 1) * page_size
     end_idx = min(start_idx + page_size, total_items)
+    
+    # Get current page's data
     page_df = df.iloc[start_idx:end_idx].copy()
     
-    st.write(f"Showing {len(page_df)} of {total_items} products")
+    st.write(f"Showing {start_idx + 1}-{end_idx} of {total_items} products")
     
     # Configure table
     column_config = {
@@ -1147,23 +1155,51 @@ def products_table(df, db, page_size=100):
         "Tag": st.column_config.TextColumn("Tag", width="small")
     }
     
-    # Create unique key for editor
-    editor_key = f"products_editor_{page}"
+    # Display editor with unique key based on current page
+    editor_key = f"products_editor_p{current_page}"
     
-    # Display editor
     edited_df = st.data_editor(
         page_df,
         column_config=column_config,
         use_container_width=True,
         num_rows="fixed",
         disabled=["Image", "Product Name", "SKU", "Stock", "Price", "Status"],
-        key=editor_key,
-        on_change=lambda: on_tag_change(
-            st.session_state[editor_key].get("edited_rows", {}),
-            page_df,
-            db
-        )
+        key=editor_key
     )
+    
+    # Handle any edits
+    if editor_key in st.session_state:
+        edited_rows = st.session_state[editor_key].get("edited_rows", {})
+        if edited_rows:
+            on_tag_change(edited_rows, page_df, db)
+    
+    # Pagination controls
+    col1, col2, col3 = st.columns([2, 3, 2])
+    
+    with col1:
+        if st.button("⬅️ Previous", disabled=current_page == 1):
+            st.session_state.product_page = current_page - 1
+            st.rerun()
+    
+    with col2:
+        page_numbers = []
+        for i in range(max(1, current_page - 2), min(total_pages + 1, current_page + 3)):
+            page_numbers.append(str(i))
+        selected_page = st.select_slider(
+            "Page",
+            options=page_numbers,
+            value=str(current_page),
+            key=f"page_slider_{current_page}",
+            label_visibility="collapsed"
+        )
+        if str(current_page) != selected_page:
+            st.session_state.product_page = int(selected_page)
+            st.rerun()
+    
+    with col3:
+        if st.button("Next ➡️", disabled=current_page >= total_pages):
+            st.session_state.product_page = current_page + 1
+            st.rerun()
 
 @st.fragment
 def pagination_controls(total_items, page_size):
@@ -1186,7 +1222,7 @@ def pagination_controls(total_items, page_size):
             st.rerun(scope="fragment")
 
 def products_page():
-    """Products page with improved state management and pagination"""
+    """Products page with improved state management"""
     st.title("📦 Products")
     
     # Initialize state
@@ -1202,17 +1238,16 @@ def products_page():
         st.error("Please authenticate first")
         return
     
-    # Search input with session state
-    search = st.text_input(
-        "🔍 Search products by name or SKU",
-        value=st.session_state.get("product_search", ""),
-        key="search_input"
-    )
-    
-    # Reset button
-    col1, col2 = st.columns([1, 5])
+    # Search input
+    col1, col2 = st.columns([3, 1])
     with col1:
-        if st.button("🔄 Reset Product List"):
+        search = st.text_input(
+            "🔍 Search products by name or SKU",
+            key="product_search"
+        )
+    
+    with col2:
+        if st.button("🔄 Reset Product List", use_container_width=True):
             st.session_state.all_products_df = None
             st.session_state.product_page = 1
             st.rerun()
@@ -1228,6 +1263,7 @@ def products_page():
             )
             
             if items:
+                # Process items into DataFrame
                 table_data = []
                 for item in items:
                     try:
@@ -1247,7 +1283,7 @@ def products_page():
                             "Product Name": item.get("item_name", ""),
                             "SKU": item.get("item_sku", ""),
                             "Stock": stock_info,
-                            "Price": price_info.get("current_price", 0) / 100000,  # Convert to proper currency
+                            "Price": price_info.get("current_price", 0) / 100000,
                             "Status": item.get("item_status", ""),
                             "Tag": ""
                         })
@@ -1255,10 +1291,11 @@ def products_page():
                         st.error(f"Error processing item: {str(e)}")
                 
                 if table_data:
-                    st.session_state.all_products_df = pd.DataFrame(table_data)
+                    df = pd.DataFrame(table_data)
+                    # Load tags from database
                     tags = db.get_product_tags()
-                    st.session_state.all_products_df['Tag'] = \
-                        st.session_state.all_products_df['SKU'].map(lambda x: tags.get(x, ""))
+                    df['Tag'] = df['SKU'].map(lambda x: tags.get(x, ""))
+                    st.session_state.all_products_df = df
     
     # Filter and display products
     if st.session_state.all_products_df is not None:
@@ -1272,15 +1309,8 @@ def products_page():
                 df['SKU'].str.lower().str.contains(search, na=False)
             ]
         
-        # Display total count
-        st.write(f"Total products: {len(df)}")
-        
-        # Use fragments for table display
+        # Display table with pagination
         products_table(df, db)
-        
-        if len(df) > 0:
-            # Pagination controls
-            pagination_controls(len(df), 50)
 
 
 def main():
