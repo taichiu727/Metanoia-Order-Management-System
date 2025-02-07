@@ -159,16 +159,25 @@ def refresh_token(refresh_token):
         raise Exception(f"Request failed: {str(e)}")
 
 def is_token_valid(token_data):
-    """Check if the token is still valid"""
+    """Check if the token is still valid and not near expiration"""
     if not token_data:
         return False
         
     current_time = int(time.time())
     fetch_time = token_data.get("fetch_time", 0)
     expire_in = token_data.get("expire_in", 0)
+    refresh_token_expire_in = token_data.get("refresh_token_expire_in", 0)
     
-    # Consider token invalid if it expires in less than 5 minutes
-    return (fetch_time + expire_in - current_time) > 300
+    # Check if refresh token is expired
+    if refresh_token_expire_in > 0 and (fetch_time + refresh_token_expire_in - current_time) <= 0:
+        return False
+    
+    # If access token is expired or will expire soon, but refresh token is valid,
+    # we can still consider the token data valid as it can be refreshed
+    if (fetch_time + expire_in - current_time) <= 300:
+        return "refresh_token" in token_data
+        
+    return True
 
 def get_valid_token(db):
     """Get a valid token from database, refresh if needed"""
@@ -176,14 +185,29 @@ def get_valid_token(db):
     
     if not token_data:
         return None
-        
-    if not is_token_valid(token_data):
+    
+    current_time = int(time.time())
+    fetch_time = token_data.get("fetch_time", 0)
+    expire_in = token_data.get("expire_in", 0)
+    
+    # If access token is expired or will expire soon, but the token data is still valid
+    # (meaning we have a valid refresh token), refresh it
+    if (fetch_time + expire_in - current_time) <= 300 and "refresh_token" in token_data:
         try:
             new_token_data = refresh_token(token_data["refresh_token"])
             if new_token_data:
+                # Preserve the refresh token expiration if it's not in the new token data
+                if ("refresh_token_expire_in" not in new_token_data and 
+                    "refresh_token_expire_in" in token_data):
+                    new_token_data["refresh_token_expire_in"] = token_data["refresh_token_expire_in"]
                 db.save_token(new_token_data)
                 return new_token_data
-        except Exception:
-            return None
+        except Exception as e:
+            print(f"Error refreshing token: {str(e)}")
+            # If token refresh fails and the current token is completely invalid,
+            # return None to trigger reauthorization
+            if not is_token_valid(token_data):
+                return None
+            return token_data
             
-    return token_data
+    return token_data if is_token_valid(token_data) else None
