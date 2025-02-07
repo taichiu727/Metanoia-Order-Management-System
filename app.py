@@ -1035,7 +1035,17 @@ def handle_product_table_edits(edited_df, original_df, db):
 
 @st.fragment 
 def products_table(access_token, client_id, client_secret, shop_id, search_keyword, page, page_size):
-    """Fragment for the products table"""
+    """Fragment for the products table with caching"""
+    # Create a cache key based on the search and pagination parameters
+    cache_key = f"products_{search_keyword}_{page}_{page_size}"
+    
+    if "products_cache" not in st.session_state:
+        st.session_state.products_cache = {}
+    
+    # Check if we have cached data
+    if cache_key in st.session_state.products_cache:
+        return st.session_state.products_cache[cache_key]
+    
     db = OrderDatabase()
     offset = (page - 1) * page_size
     
@@ -1051,16 +1061,15 @@ def products_table(access_token, client_id, client_secret, shop_id, search_keywo
         )
     
         if not products_response or "response" not in products_response:
-            st.error("Failed to fetch products")
             return None, 0
             
         items = products_response["response"].get("item", [])
         total = products_response["response"].get("total_count", 0)
         
         if not items:
-            st.info("No products found")
             return None, 0
             
+        # Get item details and process as before
         item_ids = [item["item_id"] for item in items]
         details_response = get_item_base_info(
             access_token=access_token,
@@ -1071,7 +1080,6 @@ def products_table(access_token, client_id, client_secret, shop_id, search_keywo
         )
         
         if not details_response or "response" not in details_response:
-            st.error("Failed to fetch product details")
             return None, 0
             
         # Get existing tags
@@ -1095,13 +1103,17 @@ def products_table(access_token, client_id, client_secret, shop_id, search_keywo
             })
         
         df = pd.DataFrame(table_data)
-        return df, total
+        result = (df, total)
+        
+        # Cache the results
+        st.session_state.products_cache[cache_key] = result
+        return result
 
 @st.fragment
 def product_table_editor(df):
-    """Fragment for the product table editor"""
+    """Fragment for the product table editor with improved state handling"""
     if df is None:
-        return
+        return df
         
     column_config = {
         "Image": st.column_config.ImageColumn("Image", width="small"),
@@ -1113,6 +1125,10 @@ def product_table_editor(df):
         "Tag": st.column_config.TextColumn("Tag", width="small")
     }
     
+    # Initialize last_edited_products in session state if not present
+    if "last_edited_products" not in st.session_state:
+        st.session_state.last_edited_products = df.copy()
+    
     edited_df = st.data_editor(
         df,
         column_config=column_config,
@@ -1122,17 +1138,29 @@ def product_table_editor(df):
         key="products_editor"
     )
     
+    # Only process changes if there are actual edits
     if "edited_rows" in st.session_state.products_editor:
         db = OrderDatabase()
-        for idx, changes in st.session_state.products_editor["edited_rows"].items():
+        changes_made = False
+        
+        for idx_str, changes in st.session_state.products_editor["edited_rows"].items():
             if "Tag" in changes:
-                idx = int(idx)
+                idx = int(idx_str)
                 sku = edited_df.iloc[idx]["SKU"]
                 new_tag = str(changes["Tag"]) if pd.notna(changes["Tag"]) else ""
-                db.upsert_product_tag(sku, new_tag)
+                old_tag = st.session_state.last_edited_products.iloc[idx]["Tag"]
+                
+                # Only update if tag actually changed
+                if new_tag != old_tag:
+                    db.upsert_product_tag(sku, new_tag)
+                    changes_made = True
         
-        if st.session_state.products_editor["edited_rows"]:
+        if changes_made:
             st.toast("✅ Tags updated!")
+            # Update the last edited state
+            st.session_state.last_edited_products = edited_df.copy()
+    
+    return edited_df
 
 @st.fragment
 def pagination_controls(current_page, total_items, page_size):
@@ -1154,6 +1182,7 @@ def pagination_controls(current_page, total_items, page_size):
             st.rerun()
 
 def products_page():
+    """Updated products page with better state management"""
     st.title("📦 Products")
     
     db = OrderDatabase()
@@ -1163,12 +1192,23 @@ def products_page():
         st.error("Please authenticate first")
         return
     
-    search = st.text_input("🔍 Search products by name or item number", key="product_search")
+    # Initialize session state for search if needed
+    if "product_search" not in st.session_state:
+        st.session_state.product_search = ""
+    
+    # Search input with debouncing
+    search = st.text_input(
+        "🔍 Search products by name or item number",
+        key="product_search",
+        on_change=lambda: setattr(st.session_state, "products_cache", {})  # Clear cache on search change
+    )
     
     page_size = 50
-    page = st.session_state.get("product_page", 1)
+    if "product_page" not in st.session_state:
+        st.session_state.product_page = 1
+    page = st.session_state.product_page
     
-    # Get products data using fragment
+    # Get products data using fragment with caching
     df, total_items = products_table(
         token["access_token"],
         CLIENT_ID,
@@ -1182,10 +1222,10 @@ def products_page():
     if df is not None:
         st.write(f"Showing {len(df)} of {total_items} products")
         
-        # Display and handle product table editing using fragment
-        product_table_editor(df)
+        # Display and handle product table editing using improved fragment
+        edited_df = product_table_editor(df)
         
-        # Handle pagination using fragment
+        # Handle pagination
         pagination_controls(page, total_items, page_size)
 
 def main():
