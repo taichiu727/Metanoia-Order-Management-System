@@ -1120,7 +1120,7 @@ def on_tag_change(edited_rows, current_df, db):
         st.toast("✅ Tags updated!")
 
 @st.fragment
-def products_table(df, db, page_size=50):
+def products_table(df, db, page_size=100):
     """Fragment for displaying products table with pagination"""
     if df is None or df.empty:
         st.info("No products loaded yet.")
