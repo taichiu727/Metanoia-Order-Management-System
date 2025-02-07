@@ -1094,20 +1094,24 @@ def filter_and_paginate_df(df, search_query, page, page_size):
     return df.iloc[start_idx:end_idx], total_items
 
 def on_tag_change(edited_rows, current_df, db):
-    """Handle tag changes without causing a full rerun"""
+    """Handle tag changes and update both database and session state"""
+    if not edited_rows:
+        return
+
     changes_made = False
-    
     for idx_str, changes in edited_rows.items():
         if "Tag" in changes:
             idx = int(idx_str)
             sku = current_df.iloc[idx]["SKU"]
             new_tag = str(changes["Tag"]) if pd.notna(changes["Tag"]) else ""
-            current_tag = st.session_state.product_tags.get(sku, "")
             
-            if new_tag != current_tag:
-                db.upsert_product_tag(sku, new_tag)
-                st.session_state.product_tags[sku] = new_tag
-                changes_made = True
+            # Update database
+            db.upsert_product_tag(sku, new_tag)
+            
+            # Update session state
+            mask = st.session_state.all_products_df['SKU'] == sku
+            st.session_state.all_products_df.loc[mask, 'Tag'] = new_tag
+            changes_made = True
     
     if changes_made:
         st.toast("✅ Tags updated!")
@@ -1119,20 +1123,13 @@ def products_table(df, db, page_size=50):
         st.info("No products loaded yet.")
         return
 
-    # Load tags at the beginning
-    tags = db.get_product_tags()
-    
-    # Update DataFrame with current tags
-    df = df.copy()  # Create a copy to avoid modifying the original
-    df['Tag'] = df['SKU'].map(lambda x: tags.get(x, ""))
-    
     total_items = len(df)
     page = st.session_state.product_page
     
     # Apply pagination
     start_idx = (page - 1) * page_size
     end_idx = min(start_idx + page_size, total_items)
-    page_df = df.iloc[start_idx:end_idx]
+    page_df = df.iloc[start_idx:end_idx].copy()
     
     st.write(f"Showing {len(page_df)} of {total_items} products")
     
@@ -1147,45 +1144,23 @@ def products_table(df, db, page_size=50):
         "Tag": st.column_config.TextColumn("Tag", width="small")
     }
     
-    # Display editor
+    # Create unique key for editor
     editor_key = f"products_editor_{page}"
+    
+    # Display editor
     edited_df = st.data_editor(
         page_df,
         column_config=column_config,
         use_container_width=True,
         num_rows="fixed",
         disabled=["Image", "Product Name", "SKU", "Stock", "Price", "Status"],
-        key=editor_key
+        key=editor_key,
+        on_change=lambda: on_tag_change(
+            st.session_state[editor_key].get("edited_rows", {}),
+            page_df,
+            db
+        )
     )
-    
-    # Handle tag changes and persist them
-    if editor_key in st.session_state and "edited_rows" in st.session_state[editor_key]:
-        changes_made = False
-        edited_rows = st.session_state[editor_key]["edited_rows"]
-        
-        for idx_str, changes in edited_rows.items():
-            if "Tag" in changes:
-                idx = int(idx_str)
-                sku = page_df.iloc[idx]["SKU"]
-                new_tag = str(changes["Tag"]) if pd.notna(changes["Tag"]) else ""
-                current_tag = tags.get(sku, "")
-                
-                if new_tag != current_tag:
-                    # Update database
-                    db.upsert_product_tag(sku, new_tag)
-                    
-                    # Update session state DataFrame
-                    full_idx = start_idx + idx  # Convert page index to full DataFrame index
-                    st.session_state.all_products_df.loc[
-                        st.session_state.all_products_df['SKU'] == sku, 'Tag'
-                    ] = new_tag
-                    
-                    changes_made = True
-        
-        if changes_made:
-            st.toast("✅ Tags updated!")
-            # Clear the edited_rows to prevent re-processing
-            st.session_state[editor_key]["edited_rows"] = {}
 
 @st.fragment
 def pagination_controls(total_items, page_size):
@@ -1208,7 +1183,7 @@ def pagination_controls(total_items, page_size):
             st.rerun(scope="fragment")
 
 def products_page():
-    """Products page with persistent tag changes"""
+    """Products page with improved state management"""
     st.title("📦 Products")
     
     # Initialize state
@@ -1272,9 +1247,8 @@ def products_page():
                         st.error(f"Error processing item: {str(e)}")
                 
                 if table_data:
+                    # Create DataFrame and load initial tags
                     st.session_state.all_products_df = pd.DataFrame(table_data)
-                    
-                    # Load initial tags
                     tags = db.get_product_tags()
                     st.session_state.all_products_df['Tag'] = \
                         st.session_state.all_products_df['SKU'].map(lambda x: tags.get(x, ""))
@@ -1291,12 +1265,12 @@ def products_page():
                 df['SKU'].str.lower().str.contains(search, na=False)
             ]
         
-        # Use fragments for table and pagination
+        # Use fragments for table display
         products_table(df, db)
         
         if len(df) > 0:
             # Pagination controls
-            total_pages = (len(df) + 49) // 50  # 50 items per page
+            total_pages = (len(df) + 49) // 50
             cols = st.columns(5)
             with cols[1]:
                 if st.button("⬅️ Previous", disabled=st.session_state.product_page==1):
