@@ -1064,10 +1064,19 @@ def on_tag_change(edited_rows, current_df, db):
     if changes_made:
         st.toast("✅ Tags updated!")
 
-
+def filter_products_df(df, search_query):
+    """Filter products DataFrame without triggering a rerun"""
+    if not search_query or df is None:
+        return df
+        
+    search_query = search_query.lower()
+    return df[
+        df['Product Name'].str.lower().str.contains(search_query, na=False) |
+        df['SKU'].str.lower().str.contains(search_query, na=False)
+    ]
 
 def products_page():
-    """Products page with optimized state management"""
+    """Products page with client-side filtering"""
     st.title("📦 Products")
     
     # Initialize state
@@ -1084,23 +1093,16 @@ def products_page():
     if not st.session_state.product_tags:
         st.session_state.product_tags = db.get_product_tags()
     
-    # Search with debouncing
+    # Search input without state management
     search = st.text_input(
-        "🔍 Search products by name or item number",
-        value=st.session_state.product_search,
+        "🔍 Search products by name or SKU",
         key="search_input"
     )
-    
-    # Only update search state and clear cache if search actually changed
-    if search != st.session_state.product_search:
-        st.session_state.product_search = search
-        st.session_state.products_cache = {}
-        st.session_state.products_df = None
     
     page_size = 50
     page = st.session_state.product_page
     
-    # Fetch products if needed
+    # Fetch products only if we don't have them
     if st.session_state.products_df is None:
         with st.spinner("Loading products..."):
             items, total = fetch_products_data(
@@ -1108,7 +1110,7 @@ def products_page():
                 CLIENT_ID,
                 CLIENT_SECRET,
                 SHOP_ID,
-                search,
+                "", # No search query in API call
                 page,
                 page_size
             )
@@ -1135,9 +1137,17 @@ def products_page():
                 st.session_state.products_df = pd.DataFrame(table_data)
                 st.session_state.total_items = total
     
-    # Display products if available
+    # Apply client-side filtering
     if st.session_state.products_df is not None:
-        st.write(f"Showing {len(st.session_state.products_df)} of {st.session_state.total_items} products")
+        filtered_df = filter_products_df(st.session_state.products_df, search)
+        
+        # Show count of filtered results
+        total_count = len(st.session_state.products_df)
+        filtered_count = len(filtered_df)
+        if search:
+            st.write(f"Showing {filtered_count} of {total_count} products matching '{search}'")
+        else:
+            st.write(f"Showing {filtered_count} products")
         
         # Configure table
         column_config = {
@@ -1152,7 +1162,7 @@ def products_page():
         
         # Display editor with callback
         edited_df = st.data_editor(
-            st.session_state.products_df,
+            filtered_df,
             column_config=column_config,
             use_container_width=True,
             num_rows="fixed",
@@ -1160,29 +1170,31 @@ def products_page():
             key="products_editor",
             on_change=lambda: on_tag_change(
                 st.session_state.products_editor.get("edited_rows", {}),
-                st.session_state.products_df,
+                filtered_df,
                 db
             )
         )
         
-        # Pagination
-        total_pages = (st.session_state.total_items + page_size - 1) // page_size
-        cols = st.columns(5)
-        
-        with cols[1]:
-            if st.button("⬅️ Previous", disabled=page==1, key="prev_button"):
-                st.session_state.product_page = max(1, page - 1)
-                st.session_state.products_df = None  # Force refresh
-                st.rerun()
-        
-        with cols[2]:
-            st.write(f"Page {page} of {total_pages}")
+        # Only show pagination if we're not filtering
+        if not search:
+            # Pagination
+            total_pages = (st.session_state.total_items + page_size - 1) // page_size
+            cols = st.columns(5)
             
-        with cols[3]:
-            if st.button("Next ➡️", disabled=page >= total_pages, key="next_button"):
-                st.session_state.product_page = min(total_pages, page + 1)
-                st.session_state.products_df = None  # Force refresh
-                st.rerun()
+            with cols[1]:
+                if st.button("⬅️ Previous", disabled=page==1, key="prev_button"):
+                    st.session_state.product_page = max(1, page - 1)
+                    st.session_state.products_df = None  # Force refresh
+                    st.rerun()
+            
+            with cols[2]:
+                st.write(f"Page {page} of {total_pages}")
+                
+            with cols[3]:
+                if st.button("Next ➡️", disabled=page >= total_pages, key="next_button"):
+                    st.session_state.product_page = min(total_pages, page + 1)
+                    st.session_state.products_df = None  # Force refresh
+                    st.rerun()
 
 def main():
     st.set_page_config(page_title="Order Management", layout="wide")
