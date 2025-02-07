@@ -85,6 +85,27 @@ class OrderDatabase:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            self.cursor.execute("""
+                CREATE TABLE IF NOT EXISTS product_tags (
+                    item_sku VARCHAR(100),
+                    tag_name TEXT,
+                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (item_sku)
+                )
+            """)
+            self.cursor.execute("""
+                DO $$ 
+                BEGIN 
+                    BEGIN
+                        ALTER TABLE shopee_token 
+                        ADD COLUMN refresh_token_expire_in BIGINT,
+                        ADD COLUMN refresh_token_fetch_time BIGINT;
+                    EXCEPTION
+                        WHEN duplicate_column THEN 
+                            NULL;
+                    END;
+                END $$;
+            """)
 
             self.conn.commit()
         finally:
@@ -95,10 +116,11 @@ class OrderDatabase:
             self.connect()
             self.cursor.execute("""
                 INSERT INTO shopee_token (
-                    access_token, refresh_token, expire_in, fetch_time, 
-                    shop_id, merchant_id, updated_at
+                    access_token, refresh_token, expire_in, fetch_time,
+                    shop_id, merchant_id, refresh_token_expire_in,
+                    refresh_token_fetch_time, updated_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                 ON CONFLICT (id) DO UPDATE SET
                     access_token = EXCLUDED.access_token,
                     refresh_token = EXCLUDED.refresh_token,
@@ -106,6 +128,8 @@ class OrderDatabase:
                     fetch_time = EXCLUDED.fetch_time,
                     shop_id = EXCLUDED.shop_id,
                     merchant_id = EXCLUDED.merchant_id,
+                    refresh_token_expire_in = EXCLUDED.refresh_token_expire_in,
+                    refresh_token_fetch_time = EXCLUDED.refresh_token_fetch_time,
                     updated_at = CURRENT_TIMESTAMP
                 RETURNING id
             """, (
@@ -115,6 +139,8 @@ class OrderDatabase:
                 token_data.get("fetch_time", int(time.time())),
                 token_data.get("shop_id", SHOP_ID),
                 token_data.get("merchant_id"),
+                token_data.get("refresh_token_expire_in", 365 * 24 * 60 * 60),  # Default 1 year
+                token_data.get("refresh_token_fetch_time", int(time.time())),
             ))
             self.conn.commit()
             return self.cursor.fetchone()["id"]
@@ -160,6 +186,20 @@ class OrderDatabase:
             self.conn.commit()
         finally:
             self.close()
+    def upsert_product_tag(self, item_sku, tag_name):
+        try:
+            self.connect()
+            self.cursor.execute("""
+                INSERT INTO product_tags (item_sku, tag_name, last_updated)
+                VALUES (%s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT (item_sku) 
+                DO UPDATE SET 
+                    tag_name = EXCLUDED.tag_name,
+                    last_updated = CURRENT_TIMESTAMP
+            """, (item_sku, tag_name))
+            self.conn.commit()
+        finally:
+            self.close()
     def batch_upsert_order_tracking(self, records):
         try:
             self.connect()
@@ -180,10 +220,97 @@ class OrderDatabase:
             raise
         finally:
             self.close()
+    def get_product_tags(self):
+        try:
+            self.connect()
+            self.cursor.execute("SELECT item_sku, tag_name FROM product_tags")
+            return {row['item_sku']: row['tag_name'] for row in self.cursor.fetchall()}
+        finally:
+            self.close()
 
 
+def get_products(access_token, client_id, client_secret, shop_id, offset=0, page_size=50, search_keyword=""):
+    """Fetch products from Shopee API"""
+    timestamp = int(time.time())
+    
+    params = {
+        'partner_id': client_id,
+        'timestamp': timestamp,
+        'access_token': access_token,
+        'shop_id': shop_id,
+        'offset': offset,
+        'page_size': page_size,
+        'item_status': 'NORMAL'
+    }
+    
+    if search_keyword:
+        params['keyword'] = search_keyword
 
+    path = "/api/v2/product/get_item_list"
+    sign = generate_api_signature(
+        api_type='shop',
+        partner_id=client_id,
+        path=path,
+        timestamp=timestamp,
+        access_token=access_token,
+        shop_id=shop_id,
+        client_secret=client_secret
+    )
 
+    params['sign'] = sign
+    url = f"https://partner.shopeemobile.com{path}"
+    
+    try:
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error fetching products: {response.text}")
+            return None
+    except Exception as e:
+        st.error(f"Error fetching products: {str(e)}")
+        return None
+
+def get_item_base_info(access_token, client_id, client_secret, shop_id, item_ids):
+    """Fetch detailed item information from Shopee API"""
+    timestamp = int(time.time())
+    
+    params = {
+        'partner_id': client_id,
+        'timestamp': timestamp,
+        'access_token': access_token,
+        'shop_id': shop_id,
+        'item_id_list': item_ids,
+        'need_tax_info': False,
+        'need_complaint_policy': False,
+        'need_estimated_shipping_fee': False,
+        'response_optional_fields': 'item_sku,item_name,image,price_info,stock_info_v2,item_status'
+    }
+
+    path = "/api/v2/product/get_item_base_info"
+    sign = generate_api_signature(
+        api_type='shop',
+        partner_id=client_id,
+        path=path,
+        timestamp=timestamp,
+        access_token=access_token,
+        shop_id=shop_id,
+        client_secret=client_secret
+    )
+
+    params['sign'] = sign
+    url = f"https://partner.shopeemobile.com{path}"
+    
+    try:
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error fetching item details: {response.text}")
+            return None
+    except Exception as e:
+        st.error(f"Error fetching item details: {str(e)}")
+        return None
 
 def generate_api_signature(api_type, partner_id, path, timestamp, access_token, shop_id, client_secret):
     """Generate Shopee API signature"""
@@ -362,6 +489,32 @@ def get_order_details_bulk(access_token, client_id, client_secret, shop_id, orde
 
 def initialize_session_state():
     """Initialize all session state variables"""
+    if "viewport_height" not in st.session_state:
+        st.session_state.viewport_height = 800  # Default fallback height
+        
+    # Add JavaScript to get actual viewport height
+    st.markdown(
+        """
+        <script>
+        // Send viewport height to Streamlit
+        window.addEventListener('load', function() {
+            window.parent.addEventListener('message', function(e) {
+                if (e.data.viewport_height) {
+                    var height = e.data.viewport_height;
+                    window.parent.postMessage({
+                        type: "streamlit:setComponentValue",
+                        value: height
+                    }, "*");
+                }
+            });
+            window.parent.postMessage({
+                type: "streamlit:getViewportHeight"
+            }, "*");
+        });
+        </script>
+        """,
+        unsafe_allow_html=True
+    )
     if "authentication_state" not in st.session_state:
         st.session_state.authentication_state = "initial"
         # Check for existing valid token
@@ -392,6 +545,16 @@ def initialize_session_state():
         st.session_state.show_preorders = False
 
 
+def initialize_product_state():
+    """Initialize product-related session state variables"""
+    if "product_page" not in st.session_state:
+        st.session_state.product_page = 1
+    if "product_search" not in st.session_state:
+        st.session_state.product_search = ""
+    if "product_tags" not in st.session_state:
+        st.session_state.product_tags = {}
+    if "all_products_df" not in st.session_state:
+        st.session_state.all_products_df = None
 
 def on_data_change():
     """Handle changes in the data editor"""
@@ -447,29 +610,6 @@ def on_data_change():
         st.error(f"Error saving changes: {str(e)}")
 
 
-def handle_authentication():
-    """Handle the Shopee authentication flow"""
-    if st.session_state.authentication_state != "complete":
-        st.info("Please authenticate with your Shopee account to continue.")
-        auth_url = get_auth_url()
-        st.markdown(f"[🔐 Authenticate with Shopee]({auth_url})")
-        
-        if "code" in st.query_params:
-            with st.spinner("Authenticating..."):
-                try:
-                    code = st.query_params["code"]
-                    token = fetch_token(code)
-                    #save_token(token)
-                    st.session_state.authentication_state = "complete"
-                    st.query_params.clear()
-                    #st.rerun()
-                except Exception as e:
-                    st.error(f"Authentication failed: {str(e)}")
-                   
-        return False
-    return True
-
-
 def fetch_and_process_orders(token, db):
     """Fetch orders and process them into a DataFrame"""
     with st.spinner("Fetching orders..."):
@@ -522,6 +662,7 @@ def fetch_and_process_orders(token, db):
                     orders_data.append({
                         "Order Number": order_detail["order_sn"],
                         "Created": datetime.fromtimestamp(order_detail["create_time"]).strftime("%Y-%m-%d %H:%M"),
+                        "Deadline": datetime.fromtimestamp(order_detail["ship_by_date"]).strftime("%Y-%m-%d %H:%M"),
                         "Product": item["item_name"],
                         "Quantity": item["model_quantity_purchased"],
                         "Image": item["image_info"]["image_url"],
@@ -593,6 +734,7 @@ def handle_authentication(db):
                     return False
         return False
     return True
+    
 
 def check_token_validity(db):
     """Check if the stored token is valid and refresh if needed"""
@@ -601,10 +743,22 @@ def check_token_validity(db):
         return None
     
     current_time = int(time.time())
-    token_age = current_time - token["fetch_time"]
     
-    # If token is expired or close to expiring, try to refresh it
-    if token_age > (token["expire_in"] - 300):  # Refresh if less than 5 minutes remaining
+    # Check refresh token expiration first
+    refresh_token_expire_in = token.get("refresh_token_expire_in", 365 * 24 * 60 * 60)  # Default 1 year
+    refresh_token_fetch_time = token.get("refresh_token_fetch_time", token["fetch_time"])
+    refresh_token_expiration = refresh_token_fetch_time + refresh_token_expire_in
+    
+    # If refresh token is expired, clear token and require re-authentication
+    if current_time >= refresh_token_expiration:
+        db.clear_token()
+        return None
+    
+    # Check access token expiration
+    access_token_expiration = token["fetch_time"] + token["expire_in"]
+    
+    # If access token expires in less than 5 minutes or is expired, refresh it
+    if (access_token_expiration - current_time) < 300:
         try:
             new_token_data = refresh_token(token["refresh_token"])
             if new_token_data:
@@ -614,13 +768,18 @@ def check_token_validity(db):
                     "expire_in": new_token_data["expire_in"],
                     "fetch_time": current_time,
                     "shop_id": SHOP_ID,
-                    "merchant_id": new_token_data.get("merchant_id")
+                    "merchant_id": new_token_data.get("merchant_id"),
+                    # Preserve refresh token expiration information
+                    "refresh_token_expire_in": refresh_token_expire_in,
+                    "refresh_token_fetch_time": refresh_token_fetch_time
                 }
                 db.save_token(new_token)
                 return new_token
         except Exception as e:
             st.error(f"Failed to refresh token: {str(e)}")
-            db.clear_token()
+            # Only clear token if refresh token is expired or invalid
+            if "Token invalid" in str(e) or "refresh_token_expired" in str(e):
+                db.clear_token()
             return None
     
     return token
@@ -674,77 +833,62 @@ def sidebar_controls():
 
 @st.fragment
 def orders_table(filtered_df):
-    """Fragment for the orders data editor"""
-    column_config = {
-        "Order Number": st.column_config.TextColumn(
-            "Order Number",
-            width="small",
-            help="Shopee order number"
-        ),
-        "Created": st.column_config.TextColumn(
-            "Created",
-            width="small",
-            help="Order creation date and time"
-        ),
-        "Product": st.column_config.TextColumn(
-            "Product",
-            width="small",
-            help="Product name"
-        ),
-        "Quantity": st.column_config.NumberColumn(
-            "Quantity",
-            width="small",
-            help="Ordered quantity"
-        ),
-        "Image": st.column_config.ImageColumn(
-            "Image",
-            width="small",
-            help="Product image"
-        ),
-        "Item Spec": st.column_config.TextColumn(
-            "Item Spec",
-            width="small",
-            help="Item Spec"
-        ),
-        "Item Number": st.column_config.TextColumn(
-            "Item Number",
-            width="small",
-            help="Item Number"
-        ),
-        "Received": st.column_config.CheckboxColumn(
-            "Received",
-            width="small",
-            help="Mark if item has been received"
-        ),
-        "Missing": st.column_config.NumberColumn(
-            "Missing",
-            width="small",
-            help="Number of missing items"
-        ),
-        "Note": st.column_config.TextColumn(
-            "Note",
-            width="medium",
-            help="Additional notes"
-        )
-    }
+    if filtered_df.empty:
+        return filtered_df
 
-    edited_df = st.data_editor(
-        filtered_df,
-        column_config=column_config,
-        use_container_width=True,
-        key="orders_editor",
-        num_rows="fixed",
-        height=600,
-        disabled=["Order Number", "Created", "Product", "Quantity", "Image", "Item Spec", "Item Number"]
-    )
+    db = OrderDatabase()
+    product_tags = db.get_product_tags()
+    filtered_df['Tag'] = filtered_df['Item Number'].map(lambda x: product_tags.get(x, ''))
 
-    # Check if there are changes
-    if edited_df is not None and not edited_df.equals(filtered_df):
-        # Handle the changes directly here instead of calling st.rerun
-        db = OrderDatabase()
-        handle_data_editor_changes(edited_df, db)
+    orders = filtered_df.groupby('Order Number')
+    all_edited_data = []
+    
+    for order_num, order_data in orders:
+        all_received = all(order_data['Received'])
+        status_emoji = "✅" if all_received else "⚠️" if any(order_data['Received']) else "❌"
+        
+        with st.expander(f"Order: {order_num} {status_emoji}", expanded=True):
+            column_config = {
+                "Order Number": st.column_config.TextColumn("Order Number", width="small"),
+                "Created": st.column_config.TextColumn("Created", width="small"),
+                "Deadline": st.column_config.TextColumn("Deadline", width="small"),
+                "Product": st.column_config.TextColumn("Product", width="medium"),
+                "Item Spec": st.column_config.TextColumn("Item Spec", width="small"),
+                "Item Number": st.column_config.TextColumn("Item Number", width="small"),
+                "Quantity": st.column_config.NumberColumn("Quantity", width="small"),
+                "Image": st.column_config.ImageColumn("Image", width="small"),
+                "Tag": st.column_config.TextColumn("Tag", width="small"),
+                "Received": st.column_config.CheckboxColumn("Received", width="small", default=False),
+                "Missing": st.column_config.NumberColumn("Missing", width="small", default=0),
+                "Note": st.column_config.TextColumn("Note", width="medium", default="")
+            }
+            
+            product_df = order_data[["Order Number", "Created", "Deadline", "Product", 
+                                   "Item Spec", "Item Number", "Quantity", "Image", 
+                                   "Received", "Missing", "Note", "Tag"]]
+            edited_df = st.data_editor(
+                product_df,
+                column_config=column_config,
+                use_container_width=True,
+                key=f"order_{order_num}",
+                num_rows="fixed",
+                disabled=["Order Number", "Created", "Deadline", "Product", 
+                         "Item Spec", "Item Number", "Quantity", "Image", "Tag"]
+            )
+            
+            if edited_df is not None:
+                all_edited_data.append(edited_df)
 
-    return edited_df
+    if all_edited_data:
+        combined_edits = pd.concat(all_edited_data)
+        filtered_df = filtered_df.copy()
+        for idx, row in combined_edits.iterrows():
+            mask = (filtered_df['Order Number'] == row['Order Number']) & (filtered_df['Product'] == row['Product'])
+            filtered_df.loc[mask, 'Received'] = row['Received'] if pd.notna(row['Received']) else False
+            filtered_df.loc[mask, 'Missing'] = row['Missing'] if pd.notna(row['Missing']) else 0
+            filtered_df.loc[mask, 'Note'] = row['Note'] if pd.notna(row['Note']) else ""
+
+    return filtered_df
 
 @st.fragment
 def statistics_view(df):
@@ -816,14 +960,19 @@ def auth_fragment():
                 try:
                     code = st.query_params["code"]
                     token = fetch_token(code)
-                    token["fetch_time"] = int(time.time())
-                    db = OrderDatabase()
+                    # Add fetch time and refresh token expiration
+                    current_time = int(time.time())
+                    token.update({
+                        "fetch_time": current_time,
+                        "refresh_token_fetch_time": current_time,
+                        "refresh_token_expire_in": 365 * 24 * 60 * 60  # 1 year
+                    })
                     db.save_token(token)
                     st.session_state.authentication_state = "complete"
                     st.query_params.clear()
-                    st.rerun()
                 except Exception as e:
                     st.error(f"Authentication failed: {str(e)}")
+                    db.clear_token()
                     return False
         return False
     return True
@@ -853,14 +1002,300 @@ def handle_data_editor_changes(edited_df, db):
     else:
         st.session_state.last_edited_df = edited_df.copy()
 
+
+
+
+
+
+
+@st.cache_data(ttl=300)
+def fetch_all_products(access_token, client_id, client_secret, shop_id):
+    """Fetch all products with complete pagination handling"""
+    all_items = []
+    page_size = 100
+    offset = 0
+    has_more = True
+    
+    while has_more:
+        with st.spinner(f"Fetching products (offset: {offset})..."):
+            products_response = get_products(
+                access_token=access_token,
+                client_id=client_id,
+                client_secret=client_secret,
+                shop_id=shop_id,
+                offset=offset,
+                page_size=page_size
+            )
+            
+            if not products_response or "response" not in products_response:
+                st.error(f"Failed to get products response at offset {offset}")
+                break
+            
+            response_data = products_response["response"]
+            items = response_data.get("item", [])
+            
+            if not items:
+                break
+            
+            # Get details in smaller batches
+            batch_size = 50
+            for i in range(0, len(items), batch_size):
+                batch_items = items[i:i + batch_size]
+                item_ids = [str(item["item_id"]) for item in batch_items]
+                
+                time.sleep(0.5)  # Rate limiting
+                
+                try:
+                    details_response = get_item_base_info(
+                        access_token=access_token,
+                        client_id=client_id,
+                        client_secret=client_secret,
+                        shop_id=shop_id,
+                        item_ids=item_ids
+                    )
+                    
+                    if details_response and "response" in details_response:
+                        if "item_list" in details_response["response"]:
+                            batch_items = details_response["response"]["item_list"]
+                            all_items.extend(batch_items)
+                    
+                except Exception as e:
+                    st.error(f"Error fetching batch at offset {offset}: {str(e)}")
+                    continue
+                
+                time.sleep(0.5)  # Additional rate limiting
+            
+            # Check if there are more items
+            more = response_data.get("has_next_page", False)
+            if more:
+                offset += page_size
+            else:
+                has_more = False
+    
+    st.success(f"Successfully fetched {len(all_items)} products")
+    return all_items
+
+def filter_and_paginate_df(df, search_query, page, page_size):
+    """Filter DataFrame and handle pagination"""
+    if df is None:
+        return None, 0
+        
+    # Apply search filter
+    if search_query:
+        search_query = search_query.lower()
+        df = df[
+            df['Product Name'].str.lower().str.contains(search_query, na=False) |
+            df['SKU'].str.lower().str.contains(search_query, na=False)
+        ]
+    
+    total_items = len(df)
+    
+    # Apply pagination
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    
+    return df.iloc[start_idx:end_idx], total_items
+
+def on_tag_change(edited_rows, current_df, db):
+    """Handle tag changes and update both database and session state"""
+    if not edited_rows:
+        return
+
+    changes_made = False
+    for idx_str, changes in edited_rows.items():
+        if "Tag" in changes:
+            idx = int(idx_str)
+            sku = current_df.iloc[idx]["SKU"]
+            new_tag = str(changes["Tag"]) if pd.notna(changes["Tag"]) else ""
+            
+            # Update database
+            db.upsert_product_tag(sku, new_tag)
+            
+            # Update session state
+            mask = st.session_state.all_products_df['SKU'] == sku
+            st.session_state.all_products_df.loc[mask, 'Tag'] = new_tag
+            changes_made = True
+    
+    if changes_made:
+        st.toast("✅ Tags updated!")
+
+@st.fragment
+def products_table(df, db, page_size=50):
+    """Fragment for displaying products table with pagination"""
+    if df is None or df.empty:
+        st.info("No products loaded yet.")
+        return
+
+    total_items = len(df)
+    page = st.session_state.product_page
+    
+    # Apply pagination
+    start_idx = (page - 1) * page_size
+    end_idx = min(start_idx + page_size, total_items)
+    page_df = df.iloc[start_idx:end_idx].copy()
+    
+    st.write(f"Showing {len(page_df)} of {total_items} products")
+    
+    # Configure table
+    column_config = {
+        "Image": st.column_config.ImageColumn("Image", width="small"),
+        "Product Name": st.column_config.TextColumn("Product Name", width="medium"),
+        "SKU": st.column_config.TextColumn("SKU", width="small"),
+        "Stock": st.column_config.NumberColumn("Stock", width="small"),
+        "Price": st.column_config.NumberColumn("Price", width="small", format="$%.2f"),
+        "Status": st.column_config.TextColumn("Status", width="small"),
+        "Tag": st.column_config.TextColumn("Tag", width="small")
+    }
+    
+    # Create unique key for editor
+    editor_key = f"products_editor_{page}"
+    
+    # Display editor
+    edited_df = st.data_editor(
+        page_df,
+        column_config=column_config,
+        use_container_width=True,
+        num_rows="fixed",
+        disabled=["Image", "Product Name", "SKU", "Stock", "Price", "Status"],
+        key=editor_key,
+        on_change=lambda: on_tag_change(
+            st.session_state[editor_key].get("edited_rows", {}),
+            page_df,
+            db
+        )
+    )
+
+@st.fragment
+def pagination_controls(total_items, page_size):
+    """Fragment for pagination controls"""
+    page = st.session_state.product_page
+    total_pages = (total_items + page_size - 1) // page_size
+    
+    cols = st.columns(5)
+    with cols[1]:
+        if st.button("⬅️ Previous", disabled=page==1, key="prev_page"):
+            st.session_state.product_page = max(1, page - 1)
+            st.rerun(scope="fragment")
+    
+    with cols[2]:
+        st.write(f"Page {page} of {total_pages}")
+    
+    with cols[3]:
+        if st.button("Next ➡️", disabled=page >= total_pages, key="next_page"):
+            st.session_state.product_page = min(total_pages, page + 1)
+            st.rerun(scope="fragment")
+
+def products_page():
+    """Products page with improved state management and pagination"""
+    st.title("📦 Products")
+    
+    # Initialize state
+    if "all_products_df" not in st.session_state:
+        st.session_state.all_products_df = None
+    if "product_page" not in st.session_state:
+        st.session_state.product_page = 1
+    
+    db = OrderDatabase()
+    token = db.load_token()
+    
+    if not token:
+        st.error("Please authenticate first")
+        return
+    
+    # Search input with session state
+    search = st.text_input(
+        "🔍 Search products by name or SKU",
+        value=st.session_state.get("product_search", ""),
+        key="search_input"
+    )
+    
+    # Reset button
+    col1, col2 = st.columns([1, 5])
+    with col1:
+        if st.button("🔄 Reset Product List"):
+            st.session_state.all_products_df = None
+            st.session_state.product_page = 1
+            st.rerun()
+    
+    # Fetch products if needed
+    if st.session_state.all_products_df is None:
+        with st.spinner("Loading products..."):
+            items = fetch_all_products(
+                token["access_token"],
+                CLIENT_ID,
+                CLIENT_SECRET,
+                SHOP_ID
+            )
+            
+            if items:
+                table_data = []
+                for item in items:
+                    try:
+                        price_info = (item.get("price_info") or [{}])[0]
+                        stock_info = (
+                            item.get("stock_info_v2", {})
+                            .get("summary_info", {})
+                            .get("total_available_stock", 0)
+                        )
+                        image_url = (
+                            item.get("image", {})
+                            .get("image_url_list", [""])[0]
+                        )
+                        
+                        table_data.append({
+                            "Image": image_url,
+                            "Product Name": item.get("item_name", ""),
+                            "SKU": item.get("item_sku", ""),
+                            "Stock": stock_info,
+                            "Price": price_info.get("current_price", 0) / 100000,  # Convert to proper currency
+                            "Status": item.get("item_status", ""),
+                            "Tag": ""
+                        })
+                    except Exception as e:
+                        st.error(f"Error processing item: {str(e)}")
+                
+                if table_data:
+                    st.session_state.all_products_df = pd.DataFrame(table_data)
+                    tags = db.get_product_tags()
+                    st.session_state.all_products_df['Tag'] = \
+                        st.session_state.all_products_df['SKU'].map(lambda x: tags.get(x, ""))
+    
+    # Filter and display products
+    if st.session_state.all_products_df is not None:
+        df = st.session_state.all_products_df.copy()
+        
+        # Apply search filter
+        if search:
+            search = search.lower()
+            df = df[
+                df['Product Name'].str.lower().str.contains(search, na=False) |
+                df['SKU'].str.lower().str.contains(search, na=False)
+            ]
+        
+        # Display total count
+        st.write(f"Total products: {len(df)}")
+        
+        # Use fragments for table display
+        products_table(df, db)
+        
+        if len(df) > 0:
+            # Pagination controls
+            pagination_controls(len(df), 50)
+
+
 def main():
-    st.set_page_config(page_title="Shopee Order Management", layout="wide")
+    st.set_page_config(page_title="Order Management", layout="wide")
     
     db = OrderDatabase()
     db.init_tables()
     initialize_session_state()
 
-    st.title("📦 Shopee Order Management")
+    if "product_page" not in st.session_state:
+        st.session_state.product_page = 1
+    if "product_search" not in st.session_state:
+        st.session_state.product_search = ""
+
+    st.title("📦 Order Management")
     
     # Handle authentication using fragment
     if not auth_fragment():
@@ -877,27 +1312,33 @@ def main():
     with st.sidebar:
         sidebar_controls()
 
-    # Fetch and process orders if needed
-    if st.session_state.orders_need_refresh:
-        st.session_state.orders_df = fetch_and_process_orders(token, db)
-        st.session_state.orders_need_refresh = False
+    tab1, tab2 = st.tabs(["Orders", "Products"])
+    
+    with tab1:
+        # Fetch and process orders if needed
+        if st.session_state.orders_need_refresh:
+            st.session_state.orders_df = fetch_and_process_orders(token, db)
+            st.session_state.orders_need_refresh = False
 
-    if not st.session_state.orders_df.empty:
-        # Apply filters based on session state
-        filtered_df = apply_filters(
-            st.session_state.orders_df, 
-            st.session_state.get('status_filter', 'All'),
-            st.session_state.get('show_preorders', False)
-        )
-        
-        # Use fragments for main UI components
-        edited_df = orders_table(filtered_df)
-        statistics_view(edited_df)
-        
-        st.divider()
-        export_controls(edited_df)
-    else:
-        st.info("No orders found in the selected time range.")
+        if not st.session_state.orders_df.empty:
+            # Apply filters based on session state
+            filtered_df = apply_filters(
+                st.session_state.orders_df, 
+                st.session_state.get('status_filter', 'All'),
+                st.session_state.get('show_preorders', False)
+            )
+            
+            # Use fragments for main UI components
+            edited_df = orders_table(filtered_df)
+            statistics_view(edited_df)
+            
+            st.divider()
+            export_controls(edited_df)
+        else:
+            st.info("No orders found in the selected time range.")
+    
+    with tab2:
+        products_page()
 
 if __name__ == "__main__":
     main()
