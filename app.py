@@ -1010,11 +1010,9 @@ def handle_data_editor_changes(edited_df, db):
 def fetch_all_products(access_token, client_id, client_secret, shop_id):
     """Fetch all products with pagination handling"""
     all_items = []
-    page_size = 100  # Maximum allowed by Shopee API
+    page_size = 100
     offset = 0
     
-    # First API call debug
-    st.write("Debug: Making first API call to get_products")
     products_response = get_products(
         access_token=access_token,
         client_id=client_id,
@@ -1023,8 +1021,6 @@ def fetch_all_products(access_token, client_id, client_secret, shop_id):
         offset=offset,
         page_size=page_size
     )
-    
-    st.write(f"Debug: Initial products_response: {products_response}")
     
     if not products_response or "response" not in products_response:
         st.error("Failed to get products response")
@@ -1036,29 +1032,36 @@ def fetch_all_products(access_token, client_id, client_secret, shop_id):
     if not items:
         st.warning("No items found in the shop")
         return []
+    
+    # Get details in smaller batches to avoid API limits
+    batch_size = 50  # Smaller batch size for item details
+    for i in range(0, len(items), batch_size):
+        batch_items = items[i:i + batch_size]
+        item_ids = [item["item_id"] for item in batch_items]
+        st.write(f"Debug: Getting details for batch {i//batch_size + 1}, {len(item_ids)} items")
         
-    # Get first batch details
-    item_ids = [item["item_id"] for item in items]
-    st.write(f"Debug: Getting details for {len(item_ids)} items")
+        details_response = get_item_base_info(
+            access_token=access_token,
+            client_id=client_id,
+            client_secret=client_secret,
+            shop_id=shop_id,
+            item_ids=item_ids
+        )
+        
+        st.write(f"Debug: Detail response status: {bool(details_response)}")
+        if details_response:
+            st.write("Debug: Detail response:", details_response)
+        
+        if details_response and "response" in details_response:
+            batch_items = details_response["response"].get("item_list", [])
+            all_items.extend(batch_items)
+            st.write(f"Debug: Added {len(batch_items)} items to all_items")
+            time.sleep(0.5)  # Prevent rate limiting
+        else:
+            st.error(f"Failed to get details for batch {i//batch_size + 1}")
+            st.write("Debug: Failed response:", details_response)
     
-    details_response = get_item_base_info(
-        access_token=access_token,
-        client_id=client_id,
-        client_secret=client_secret,
-        shop_id=shop_id,
-        item_ids=item_ids
-    )
-    
-    st.write(f"Debug: details_response received: {bool(details_response)}")
-    
-    if details_response and "response" in details_response:
-        batch_items = details_response["response"].get("item_list", [])
-        all_items.extend(batch_items)
-        st.write(f"Debug: Successfully added {len(batch_items)} items")
-    else:
-        st.error("Failed to get item details")
-        return []
-    
+    st.write(f"Debug: Total items collected: {len(all_items)}")
     return all_items
 
 def filter_and_paginate_df(df, search_query, page, page_size):
@@ -1103,7 +1106,7 @@ def on_tag_change(edited_rows, current_df, db):
 
 
 def products_page():
-    """Products page with debugging"""
+    """Products page with improved error handling"""
     st.title("📦 Products")
     
     # Initialize state
@@ -1119,8 +1122,7 @@ def products_page():
         st.error("Please authenticate first")
         return
     
-    # Load product tags
-    product_tags = db.get_product_tags()
+    st.write("Debug: Token found:", bool(token))
     
     # Search input
     search = st.text_input(
@@ -1128,8 +1130,10 @@ def products_page():
         key="search_input"
     )
     
-    page_size = 50
-    page = st.session_state.product_page
+    # Reset button
+    if st.button("🔄 Reset Product List"):
+        st.session_state.all_products_df = None
+        st.rerun()
     
     # Fetch all products if we don't have them
     if st.session_state.all_products_df is None:
@@ -1142,27 +1146,38 @@ def products_page():
             )
             
             if items:
-                st.write(f"Debug: Processing {len(items)} items")
+                st.write(f"Debug: Processing {len(items)} items into DataFrame")
                 # Prepare data for table
                 table_data = []
                 for item in items:
-                    price_info = item.get("price_info", [{}])[0]
-                    stock_info = item.get("stock_info_v2", {}).get("summary_info", {})
-                    image_url = item.get("image", {}).get("image_url_list", [""])[0]
-                    sku = item.get("item_sku", "")
-                    
-                    table_data.append({
-                        "Image": image_url,
-                        "Product Name": item.get("item_name", ""),
-                        "SKU": sku,
-                        "Stock": stock_info.get("total_available_stock", 0),
-                        "Price": price_info.get("current_price", 0),
-                        "Status": item.get("item_status", ""),
-                        "Tag": product_tags.get(sku, "")
-                    })
+                    try:
+                        price_info = item.get("price_info", [{}])[0]
+                        stock_info = item.get("stock_info_v2", {}).get("summary_info", {})
+                        image_url = item.get("image", {}).get("image_url_list", [""])[0]
+                        sku = item.get("item_sku", "")
+                        
+                        row_data = {
+                            "Image": image_url,
+                            "Product Name": item.get("item_name", ""),
+                            "SKU": sku,
+                            "Stock": stock_info.get("total_available_stock", 0),
+                            "Price": price_info.get("current_price", 0),
+                            "Status": item.get("item_status", ""),
+                            "Tag": ""
+                        }
+                        table_data.append(row_data)
+                        st.write("Debug: Processed item:", row_data)
+                    except Exception as e:
+                        st.error(f"Error processing item: {str(e)}")
+                        st.write("Debug: Problematic item:", item)
                 
-                st.session_state.all_products_df = pd.DataFrame(table_data)
-                st.write(f"Debug: Created DataFrame with {len(table_data)} rows")
+                if table_data:
+                    st.session_state.all_products_df = pd.DataFrame(table_data)
+                    st.write(f"Debug: Created DataFrame with {len(table_data)} rows")
+                else:
+                    st.error("No data to create DataFrame")
+            else:
+                st.error("No items returned from fetch_all_products")
     
     # Display products
     if st.session_state.all_products_df is not None:
