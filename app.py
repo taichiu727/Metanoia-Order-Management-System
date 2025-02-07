@@ -544,16 +544,15 @@ def initialize_session_state():
 
 
 def initialize_product_state():
+    """Initialize product-related session state variables"""
     if "product_page" not in st.session_state:
         st.session_state.product_page = 1
     if "product_search" not in st.session_state:
         st.session_state.product_search = ""
-    if "products_cache" not in st.session_state:
-        st.session_state.products_cache = {}
     if "product_tags" not in st.session_state:
         st.session_state.product_tags = {}
-    if "products_df" not in st.session_state:
-        st.session_state.products_df = None
+    if "all_products_df" not in st.session_state:
+        st.session_state.all_products_df = None
 
 def on_data_change():
     """Handle changes in the data editor"""
@@ -1008,42 +1007,71 @@ def handle_data_editor_changes(edited_df, db):
 
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
-def fetch_products_data(access_token, client_id, client_secret, shop_id, search_keyword, page, page_size):
-    """Fetch products with caching"""
-    offset = (page - 1) * page_size
+def fetch_all_products(access_token, client_id, client_secret, shop_id):
+    """Fetch all products with pagination handling"""
+    all_items = []
+    page_size = 100  # Maximum allowed by Shopee API
+    offset = 0
     
-    products_response = get_products(
-        access_token=access_token,
-        client_id=client_id,
-        client_secret=client_secret,
-        shop_id=shop_id,
-        offset=offset,
-        page_size=page_size,
-        search_keyword=search_keyword
-    )
+    while True:
+        with st.spinner(f"Loading products... ({len(all_items)} loaded)"):
+            products_response = get_products(
+                access_token=access_token,
+                client_id=client_id,
+                client_secret=client_secret,
+                shop_id=shop_id,
+                offset=offset,
+                page_size=page_size
+            )
+            
+            if not products_response or "response" not in products_response:
+                break
+                
+            items = products_response["response"].get("item", [])
+            if not items:
+                break
+                
+            # Get details for this batch
+            item_ids = [item["item_id"] for item in items]
+            details_response = get_item_base_info(
+                access_token=access_token,
+                client_id=client_id,
+                client_secret=client_secret,
+                shop_id=shop_id,
+                item_ids=item_ids
+            )
+            
+            if details_response and "response" in details_response:
+                all_items.extend(details_response["response"].get("item_list", []))
+            
+            if len(items) < page_size:
+                break
+                
+            offset += page_size
+            time.sleep(0.5)  # Prevent rate limiting
     
-    if not products_response or "response" not in products_response:
+    return all_items
+
+def filter_and_paginate_df(df, search_query, page, page_size):
+    """Filter DataFrame and handle pagination"""
+    if df is None:
         return None, 0
         
-    items = products_response["response"].get("item", [])
-    total = products_response["response"].get("total_count", 0)
+    # Apply search filter
+    if search_query:
+        search_query = search_query.lower()
+        df = df[
+            df['Product Name'].str.lower().str.contains(search_query, na=False) |
+            df['SKU'].str.lower().str.contains(search_query, na=False)
+        ]
     
-    if not items:
-        return None, 0
-        
-    item_ids = [item["item_id"] for item in items]
-    details_response = get_item_base_info(
-        access_token=access_token,
-        client_id=client_id,
-        client_secret=client_secret,
-        shop_id=shop_id,
-        item_ids=item_ids
-    )
+    total_items = len(df)
     
-    if not details_response or "response" not in details_response:
-        return None, 0
+    # Apply pagination
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
     
-    return details_response["response"].get("item_list", []), total
+    return df.iloc[start_idx:end_idx], total_items
 
 def on_tag_change(edited_rows, current_df, db):
     """Handle tag changes without causing a full rerun"""
@@ -1064,19 +1092,9 @@ def on_tag_change(edited_rows, current_df, db):
     if changes_made:
         st.toast("✅ Tags updated!")
 
-def filter_products_df(df, search_query):
-    """Filter products DataFrame without triggering a rerun"""
-    if not search_query or df is None:
-        return df
-        
-    search_query = search_query.lower()
-    return df[
-        df['Product Name'].str.lower().str.contains(search_query, na=False) |
-        df['SKU'].str.lower().str.contains(search_query, na=False)
-    ]
 
 def products_page():
-    """Products page with client-side filtering"""
+    """Products page with complete search capabilities"""
     st.title("📦 Products")
     
     # Initialize state
@@ -1093,7 +1111,7 @@ def products_page():
     if not st.session_state.product_tags:
         st.session_state.product_tags = db.get_product_tags()
     
-    # Search input without state management
+    # Search input
     search = st.text_input(
         "🔍 Search products by name or SKU",
         key="search_input"
@@ -1102,99 +1120,98 @@ def products_page():
     page_size = 50
     page = st.session_state.product_page
     
-    # Fetch products only if we don't have them
-    if st.session_state.products_df is None:
-        with st.spinner("Loading products..."):
-            items, total = fetch_products_data(
-                token["access_token"],
-                CLIENT_ID,
-                CLIENT_SECRET,
-                SHOP_ID,
-                "", # No search query in API call
-                page,
-                page_size
-            )
-            
-            if items is not None:
-                # Prepare data for table
-                table_data = []
-                for item in items:
-                    price_info = item.get("price_info", [{}])[0]
-                    stock_info = item.get("stock_info_v2", {}).get("summary_info", {})
-                    image_url = item.get("image", {}).get("image_url_list", [""])[0]
-                    sku = item.get("item_sku", "")
-                    
-                    table_data.append({
-                        "Image": image_url,
-                        "Product Name": item.get("item_name", ""),
-                        "SKU": sku,
-                        "Stock": stock_info.get("total_available_stock", 0),
-                        "Price": price_info.get("current_price", 0),
-                        "Status": item.get("item_status", ""),
-                        "Tag": st.session_state.product_tags.get(sku, "")
-                    })
-                
-                st.session_state.products_df = pd.DataFrame(table_data)
-                st.session_state.total_items = total
-    
-    # Apply client-side filtering
-    if st.session_state.products_df is not None:
-        filtered_df = filter_products_df(st.session_state.products_df, search)
-        
-        # Show count of filtered results
-        total_count = len(st.session_state.products_df)
-        filtered_count = len(filtered_df)
-        if search:
-            st.write(f"Showing {filtered_count} of {total_count} products matching '{search}'")
-        else:
-            st.write(f"Showing {filtered_count} products")
-        
-        # Configure table
-        column_config = {
-            "Image": st.column_config.ImageColumn("Image", width="small"),
-            "Product Name": st.column_config.TextColumn("Product Name", width="medium"),
-            "SKU": st.column_config.TextColumn("SKU", width="small"),
-            "Stock": st.column_config.NumberColumn("Stock", width="small"),
-            "Price": st.column_config.NumberColumn("Price", width="small", format="$%.2f"),
-            "Status": st.column_config.TextColumn("Status", width="small"),
-            "Tag": st.column_config.TextColumn("Tag", width="small")
-        }
-        
-        # Display editor with callback
-        edited_df = st.data_editor(
-            filtered_df,
-            column_config=column_config,
-            use_container_width=True,
-            num_rows="fixed",
-            disabled=["Image", "Product Name", "SKU", "Stock", "Price", "Status"],
-            key="products_editor",
-            on_change=lambda: on_tag_change(
-                st.session_state.products_editor.get("edited_rows", {}),
-                filtered_df,
-                db
-            )
+    # Fetch all products if we don't have them
+    if st.session_state.all_products_df is None:
+        items = fetch_all_products(
+            token["access_token"],
+            CLIENT_ID,
+            CLIENT_SECRET,
+            SHOP_ID
         )
         
-        # Only show pagination if we're not filtering
-        if not search:
-            # Pagination
-            total_pages = (st.session_state.total_items + page_size - 1) // page_size
-            cols = st.columns(5)
-            
-            with cols[1]:
-                if st.button("⬅️ Previous", disabled=page==1, key="prev_button"):
-                    st.session_state.product_page = max(1, page - 1)
-                    st.session_state.products_df = None  # Force refresh
-                    st.rerun()
-            
-            with cols[2]:
-                st.write(f"Page {page} of {total_pages}")
+        if items:
+            # Prepare data for table
+            table_data = []
+            for item in items:
+                price_info = item.get("price_info", [{}])[0]
+                stock_info = item.get("stock_info_v2", {}).get("summary_info", {})
+                image_url = item.get("image", {}).get("image_url_list", [""])[0]
+                sku = item.get("item_sku", "")
                 
-            with cols[3]:
-                if st.button("Next ➡️", disabled=page >= total_pages, key="next_button"):
-                    st.session_state.product_page = min(total_pages, page + 1)
-                    st.session_state.products_df = None  # Force refresh
-                    st.rerun()
+                table_data.append({
+                    "Image": image_url,
+                    "Product Name": item.get("item_name", ""),
+                    "SKU": sku,
+                    "Stock": stock_info.get("total_available_stock", 0),
+                    "Price": price_info.get("current_price", 0),
+                    "Status": item.get("item_status", ""),
+                    "Tag": st.session_state.product_tags.get(sku, "")
+                })
+            
+            st.session_state.all_products_df = pd.DataFrame(table_data)
+    
+    # Apply filtering and pagination
+    if st.session_state.all_products_df is not None:
+        filtered_df, total_items = filter_and_paginate_df(
+            st.session_state.all_products_df,
+            search,
+            page,
+            page_size
+        )
+        
+        # Show count of filtered results
+        if search:
+            st.write(f"Found {total_items} products matching '{search}'")
+        else:
+            st.write(f"Total {total_items} products")
+        
+        if filtered_df is not None and not filtered_df.empty:
+            # Configure table
+            column_config = {
+                "Image": st.column_config.ImageColumn("Image", width="small"),
+                "Product Name": st.column_config.TextColumn("Product Name", width="medium"),
+                "SKU": st.column_config.TextColumn("SKU", width="small"),
+                "Stock": st.column_config.NumberColumn("Stock", width="small"),
+                "Price": st.column_config.NumberColumn("Price", width="small", format="$%.2f"),
+                "Status": st.column_config.TextColumn("Status", width="small"),
+                "Tag": st.column_config.TextColumn("Tag", width="small")
+            }
+            
+            # Display editor with callback
+            edited_df = st.data_editor(
+                filtered_df,
+                column_config=column_config,
+                use_container_width=True,
+                num_rows="fixed",
+                disabled=["Image", "Product Name", "SKU", "Stock", "Price", "Status"],
+                key="products_editor",
+                on_change=lambda: on_tag_change(
+                    st.session_state.products_editor.get("edited_rows", {}),
+                    filtered_df,
+                    db
+                )
+            )
+            
+            # Pagination
+            total_pages = (total_items + page_size - 1) // page_size
+            if total_pages > 1:
+                cols = st.columns(5)
+                
+                with cols[1]:
+                    if st.button("⬅️ Previous", disabled=page==1, key="prev_button"):
+                        st.session_state.product_page = max(1, page - 1)
+                        st.rerun()
+                
+                with cols[2]:
+                    st.write(f"Page {page} of {total_pages}")
+                    
+                with cols[3]:
+                    if st.button("Next ➡️", disabled=page >= total_pages, key="next_button"):
+                        st.session_state.product_page = min(total_pages, page + 1)
+                        st.rerun()
+        else:
+            st.info("No products found matching your search.")
+
 
 def main():
     st.set_page_config(page_title="Order Management", layout="wide")
