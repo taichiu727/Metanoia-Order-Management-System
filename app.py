@@ -1112,9 +1112,83 @@ def on_tag_change(edited_rows, current_df, db):
     if changes_made:
         st.toast("✅ Tags updated!")
 
+@st.fragment
+def products_table(df, db, page_size=50):
+    """Fragment for displaying products table with pagination"""
+    if df is None or df.empty:
+        st.info("No products loaded yet.")
+        return
+
+    # Load tags once at the fragment level
+    tags = db.get_product_tags()
+    df['Tag'] = df['SKU'].map(lambda x: tags.get(x, ""))
+    
+    total_items = len(df)
+    page = st.session_state.product_page
+    
+    # Apply pagination
+    start_idx = (page - 1) * page_size
+    end_idx = min(start_idx + page_size, total_items)
+    page_df = df.iloc[start_idx:end_idx]
+    
+    st.write(f"Showing {len(page_df)} of {total_items} products")
+    
+    # Configure table
+    column_config = {
+        "Image": st.column_config.ImageColumn("Image", width="small"),
+        "Product Name": st.column_config.TextColumn("Product Name", width="medium"),
+        "SKU": st.column_config.TextColumn("SKU", width="small"),
+        "Stock": st.column_config.NumberColumn("Stock", width="small"),
+        "Price": st.column_config.NumberColumn("Price", width="small", format="$%.2f"),
+        "Status": st.column_config.TextColumn("Status", width="small"),
+        "Tag": st.column_config.TextColumn("Tag", width="small")
+    }
+    
+    # Display editor
+    edited_df = st.data_editor(
+        page_df,
+        column_config=column_config,
+        use_container_width=True,
+        num_rows="fixed",
+        disabled=["Image", "Product Name", "SKU", "Stock", "Price", "Status"],
+        key=f"products_editor_{page}"
+    )
+    
+    # Handle tag changes without reloading
+    editor_key = f"products_editor_{page}"
+    if editor_key in st.session_state and "edited_rows" in st.session_state[editor_key]:
+        edited_rows = st.session_state[editor_key]["edited_rows"]
+        for idx_str, changes in edited_rows.items():
+            if "Tag" in changes:
+                idx = int(idx_str)
+                sku = page_df.iloc[idx]["SKU"]
+                new_tag = str(changes["Tag"]) if pd.notna(changes["Tag"]) else ""
+                if new_tag != tags.get(sku, ""):
+                    db.upsert_product_tag(sku, new_tag)
+                    st.toast("✅ Tag updated!")
+
+@st.fragment
+def pagination_controls(total_items, page_size):
+    """Fragment for pagination controls"""
+    page = st.session_state.product_page
+    total_pages = (total_items + page_size - 1) // page_size
+    
+    cols = st.columns(5)
+    with cols[1]:
+        if st.button("⬅️ Previous", disabled=page==1, key="prev_page"):
+            st.session_state.product_page = max(1, page - 1)
+            st.rerun(scope="fragment")
+    
+    with cols[2]:
+        st.write(f"Page {page} of {total_pages}")
+    
+    with cols[3]:
+        if st.button("Next ➡️", disabled=page >= total_pages, key="next_page"):
+            st.session_state.product_page = min(total_pages, page + 1)
+            st.rerun(scope="fragment")
 
 def products_page():
-    """Products page with improved error handling"""
+    """Products page using fragments"""
     st.title("📦 Products")
     
     # Initialize state
@@ -1141,7 +1215,7 @@ def products_page():
         st.session_state.all_products_df = None
         st.rerun()
     
-    # Fetch all products if we don't have them
+    # Fetch products if needed
     if st.session_state.all_products_df is None:
         with st.spinner("Loading products..."):
             items = fetch_all_products(
@@ -1150,24 +1224,17 @@ def products_page():
                 CLIENT_SECRET,
                 SHOP_ID
             )
-            
             if items:
-                st.write(f"Debug: Processing {len(items)} items into DataFrame")
-                # Prepare data for table
+                # Process items into DataFrame
                 table_data = []
                 for item in items:
                     try:
-                        # Get the first price info or use defaults
                         price_info = (item.get("price_info") or [{}])[0]
-                        
-                        # Handle potential missing nested structures
                         stock_info = (
                             item.get("stock_info_v2", {})
                             .get("summary_info", {})
                             .get("total_available_stock", 0)
                         )
-                        
-                        # Get the first image or use empty string
                         image_url = (
                             item.get("image", {})
                             .get("image_url_list", [""])[0]
@@ -1180,27 +1247,16 @@ def products_page():
                             "Stock": stock_info,
                             "Price": price_info.get("current_price", 0),
                             "Status": item.get("item_status", ""),
-                            "Tag": ""
                         })
                     except Exception as e:
-                        st.write(f"Debug: Error processing item: {str(e)}")
-                        st.write("Debug: Problem item:", item)
+                        st.error(f"Error processing item: {str(e)}")
                 
                 if table_data:
                     st.session_state.all_products_df = pd.DataFrame(table_data)
-                    st.write(f"Debug: Created DataFrame with {len(table_data)} rows")
-                else:
-                    st.error("No data to create DataFrame")
-            else:
-                st.error("No items returned from fetch_all_products")
     
-    # Display products
-    if st.session_state.all_products_df is not None and not st.session_state.all_products_df.empty:
+    # Filter and display products
+    if st.session_state.all_products_df is not None:
         df = st.session_state.all_products_df.copy()
-        
-        # Load and apply tags
-        tags = db.get_product_tags()
-        df['Tag'] = df['SKU'].map(lambda x: tags.get(x, ""))
         
         # Apply search filter
         if search:
@@ -1210,70 +1266,10 @@ def products_page():
                 df['SKU'].str.lower().str.contains(search, na=False)
             ]
         
-        total_items = len(df)
-        
-        if total_items > 0:
-            page_size = 50
-            page = st.session_state.product_page
-            
-            # Apply pagination
-            start_idx = (page - 1) * page_size
-            end_idx = min(start_idx + page_size, total_items)
-            page_df = df.iloc[start_idx:end_idx]
-            
-            st.write(f"Showing {len(page_df)} of {total_items} products")
-            
-            # Configure table
-            column_config = {
-                "Image": st.column_config.ImageColumn("Image", width="small"),
-                "Product Name": st.column_config.TextColumn("Product Name", width="medium"),
-                "SKU": st.column_config.TextColumn("SKU", width="small"),
-                "Stock": st.column_config.NumberColumn("Stock", width="small"),
-                "Price": st.column_config.NumberColumn("Price", width="small", format="$%.2f"),
-                "Status": st.column_config.TextColumn("Status", width="small"),
-                "Tag": st.column_config.TextColumn("Tag", width="small")
-            }
-            
-            # Display editor
-            edited_df = st.data_editor(
-                page_df,
-                column_config=column_config,
-                use_container_width=True,
-                num_rows="fixed",
-                disabled=["Image", "Product Name", "SKU", "Stock", "Price", "Status"],
-                key="products_editor"
-            )
-            
-            # Handle tag changes
-            if "edited_rows" in st.session_state.products_editor:
-                for idx_str, changes in st.session_state.products_editor["edited_rows"].items():
-                    if "Tag" in changes:
-                        idx = int(idx_str)
-                        sku = page_df.iloc[idx]["SKU"]
-                        new_tag = str(changes["Tag"]) if pd.notna(changes["Tag"]) else ""
-                        db.upsert_product_tag(sku, new_tag)
-                        st.toast("✅ Tags updated!")
-            
-            # Pagination controls
-            total_pages = (total_items + page_size - 1) // page_size
-            cols = st.columns(5)
-            
-            with cols[1]:
-                if st.button("⬅️ Previous", disabled=page==1):
-                    st.session_state.product_page = max(1, page - 1)
-                    st.rerun()
-            
-            with cols[2]:
-                st.write(f"Page {page} of {total_pages}")
-                
-            with cols[3]:
-                if st.button("Next ➡️", disabled=page >= total_pages):
-                    st.session_state.product_page = min(total_pages, page + 1)
-                    st.rerun()
-        else:
-            st.info("No products found matching your search.")
-    else:
-        st.info("No products loaded yet.")
+        # Use fragments for table and pagination
+        products_table(df, db)
+        if len(df) > 0:
+            pagination_controls(len(df), 50)
 
 
 def main():
