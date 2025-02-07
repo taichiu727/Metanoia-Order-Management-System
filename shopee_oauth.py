@@ -103,6 +103,10 @@ def fetch_token(code):
         "shop_id": SHOP_ID,
         "partner_id": int(CLIENT_ID)
     }
+    data["fetch_time"] = int(time.time())
+    if "refresh_token_expire_in" not in data:
+        # Default to ~1 year if not provided by the API
+        data["refresh_token_expire_in"] = 365 * 24 * 60 * 60
     
     try:
         response = requests.post(url, params=params, json=payload)

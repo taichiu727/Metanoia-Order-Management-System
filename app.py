@@ -93,6 +93,19 @@ class OrderDatabase:
                     PRIMARY KEY (item_sku)
                 )
             """)
+            self.cursor.execute("""
+                DO $$ 
+                BEGIN 
+                    BEGIN
+                        ALTER TABLE shopee_token 
+                        ADD COLUMN refresh_token_expire_in BIGINT,
+                        ADD COLUMN refresh_token_fetch_time BIGINT;
+                    EXCEPTION
+                        WHEN duplicate_column THEN 
+                            NULL;
+                    END;
+                END $$;
+            """)
 
             self.conn.commit()
         finally:
@@ -705,6 +718,43 @@ def handle_authentication(db):
         return False
     return True
 
+class OrderDatabase:
+    def save_token(self, token_data):
+        try:
+            self.connect()
+            self.cursor.execute("""
+                INSERT INTO shopee_token (
+                    access_token, refresh_token, expire_in, fetch_time,
+                    shop_id, merchant_id, refresh_token_expire_in,
+                    refresh_token_fetch_time, updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT (id) DO UPDATE SET
+                    access_token = EXCLUDED.access_token,
+                    refresh_token = EXCLUDED.refresh_token,
+                    expire_in = EXCLUDED.expire_in,
+                    fetch_time = EXCLUDED.fetch_time,
+                    shop_id = EXCLUDED.shop_id,
+                    merchant_id = EXCLUDED.merchant_id,
+                    refresh_token_expire_in = EXCLUDED.refresh_token_expire_in,
+                    refresh_token_fetch_time = EXCLUDED.refresh_token_fetch_time,
+                    updated_at = CURRENT_TIMESTAMP
+                RETURNING id
+            """, (
+                token_data["access_token"],
+                token_data["refresh_token"],
+                token_data["expire_in"],
+                token_data.get("fetch_time", int(time.time())),
+                token_data.get("shop_id", SHOP_ID),
+                token_data.get("merchant_id"),
+                token_data.get("refresh_token_expire_in", 365 * 24 * 60 * 60),  # Default 1 year
+                token_data.get("refresh_token_fetch_time", int(time.time())),
+            ))
+            self.conn.commit()
+            return self.cursor.fetchone()["id"]
+        finally:
+            self.close()
+
 def check_token_validity(db):
     """Check if the stored token is valid and refresh if needed"""
     token = db.load_token()
@@ -712,11 +762,22 @@ def check_token_validity(db):
         return None
     
     current_time = int(time.time())
-    expiration_time = token["fetch_time"] + token["expire_in"]
-    time_remaining = expiration_time - current_time
     
-    # If token expires in less than 5 minutes or is expired, refresh it
-    if time_remaining < 300:
+    # Check refresh token expiration first
+    refresh_token_expire_in = token.get("refresh_token_expire_in", 365 * 24 * 60 * 60)  # Default 1 year
+    refresh_token_fetch_time = token.get("refresh_token_fetch_time", token["fetch_time"])
+    refresh_token_expiration = refresh_token_fetch_time + refresh_token_expire_in
+    
+    # If refresh token is expired, clear token and require re-authentication
+    if current_time >= refresh_token_expiration:
+        db.clear_token()
+        return None
+    
+    # Check access token expiration
+    access_token_expiration = token["fetch_time"] + token["expire_in"]
+    
+    # If access token expires in less than 5 minutes or is expired, refresh it
+    if (access_token_expiration - current_time) < 300:
         try:
             new_token_data = refresh_token(token["refresh_token"])
             if new_token_data:
@@ -726,13 +787,18 @@ def check_token_validity(db):
                     "expire_in": new_token_data["expire_in"],
                     "fetch_time": current_time,
                     "shop_id": SHOP_ID,
-                    "merchant_id": new_token_data.get("merchant_id")
+                    "merchant_id": new_token_data.get("merchant_id"),
+                    # Preserve refresh token expiration information
+                    "refresh_token_expire_in": refresh_token_expire_in,
+                    "refresh_token_fetch_time": refresh_token_fetch_time
                 }
                 db.save_token(new_token)
                 return new_token
         except Exception as e:
             st.error(f"Failed to refresh token: {str(e)}")
-            db.clear_token()
+            # Only clear token if refresh token is expired or invalid
+            if "Token invalid" in str(e) or "refresh_token_expired" in str(e):
+                db.clear_token()
             return None
     
     return token
@@ -913,14 +979,19 @@ def auth_fragment():
                 try:
                     code = st.query_params["code"]
                     token = fetch_token(code)
-                    token["fetch_time"] = int(time.time())
-                    db = OrderDatabase()
+                    # Add fetch time and refresh token expiration
+                    current_time = int(time.time())
+                    token.update({
+                        "fetch_time": current_time,
+                        "refresh_token_fetch_time": current_time,
+                        "refresh_token_expire_in": 365 * 24 * 60 * 60  # 1 year
+                    })
                     db.save_token(token)
                     st.session_state.authentication_state = "complete"
                     st.query_params.clear()
-                    st.rerun()
                 except Exception as e:
                     st.error(f"Authentication failed: {str(e)}")
+                    db.clear_token()
                     return False
         return False
     return True
