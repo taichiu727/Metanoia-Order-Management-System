@@ -282,7 +282,9 @@ def get_item_base_info(access_token, client_id, client_secret, shop_id, item_ids
         'shop_id': shop_id,
         'item_id_list': item_ids,
         'need_tax_info': False,
-        'need_complaint_policy': False
+        'need_complaint_policy': False,
+        'need_shipping_fee': False,
+        'response_optional_fields': 'item_sku,item_name,image,price_info,stock_info_v2,item_status'
     }
 
     path = "/api/v2/product/get_item_base_info"
