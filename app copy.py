@@ -1010,69 +1010,66 @@ def handle_data_editor_changes(edited_df, db):
 
 @st.cache_data(ttl=300)
 def fetch_all_products(access_token, client_id, client_secret, shop_id):
-    """Fetch all products with complete pagination handling"""
+    """Fetch all products with pagination handling"""
     all_items = []
     page_size = 100
     offset = 0
-    has_more = True
     
-    while has_more:
-        with st.spinner(f"Fetching products (offset: {offset})..."):
-            products_response = get_products(
+    products_response = get_products(
+        access_token=access_token,
+        client_id=client_id,
+        client_secret=client_secret,
+        shop_id=shop_id,
+        offset=offset,
+        page_size=page_size
+    )
+    
+    if not products_response or "response" not in products_response:
+        st.error("Failed to get products response")
+        return []
+        
+    items = products_response["response"].get("item", [])
+    st.write(f"Debug: Found {len(items)} items in first page")
+    
+    if not items:
+        st.warning("No items found in the shop")
+        return []
+    
+    # Get details in smaller batches
+    batch_size = 50# Even smaller batch size
+    for i in range(0, len(items), batch_size):
+        batch_items = items[i:i + batch_size]
+        item_ids = [str(item["item_id"]) for item in batch_items]
+        
+        st.write(f"Debug: Getting details for batch {i//batch_size + 1}, {len(item_ids)} items")
+        time.sleep(1)  # Add more delay between batches
+        
+        try:
+            details_response = get_item_base_info(
                 access_token=access_token,
                 client_id=client_id,
                 client_secret=client_secret,
                 shop_id=shop_id,
-                offset=offset,
-                page_size=page_size
+                item_ids=item_ids
             )
             
-            if not products_response or "response" not in products_response:
-                st.error(f"Failed to get products response at offset {offset}")
-                break
-            
-            response_data = products_response["response"]
-            items = response_data.get("item", [])
-            
-            if not items:
-                break
-            
-            # Get details in smaller batches
-            batch_size = 50
-            for i in range(0, len(items), batch_size):
-                batch_items = items[i:i + batch_size]
-                item_ids = [str(item["item_id"]) for item in batch_items]
-                
-                time.sleep(0.5)  # Rate limiting
-                
-                try:
-                    details_response = get_item_base_info(
-                        access_token=access_token,
-                        client_id=client_id,
-                        client_secret=client_secret,
-                        shop_id=shop_id,
-                        item_ids=item_ids
-                    )
-                    
-                    if details_response and "response" in details_response:
-                        if "item_list" in details_response["response"]:
-                            batch_items = details_response["response"]["item_list"]
-                            all_items.extend(batch_items)
-                    
-                except Exception as e:
-                    st.error(f"Error fetching batch at offset {offset}: {str(e)}")
-                    continue
-                
-                time.sleep(0.5)  # Additional rate limiting
-            
-            # Check if there are more items
-            more = response_data.get("has_next_page", False)
-            if more:
-                offset += page_size
+            if details_response and "response" in details_response:
+                if "item_list" in details_response["response"]:
+                    batch_items = details_response["response"]["item_list"]
+                    all_items.extend(batch_items)
+                    st.write(f"Debug: Successfully added {len(batch_items)} items")
+                else:
+                    st.write("Debug: No item_list in response:", details_response["response"])
             else:
-                has_more = False
+                st.write("Debug: Invalid response structure:", details_response)
+                
+        except Exception as e:
+            st.error(f"Error fetching batch {i//batch_size + 1}: {str(e)}")
+            continue
+            
+        time.sleep(0.5)
     
-    st.success(f"Successfully fetched {len(all_items)} products")
+    st.write(f"Debug: Total items collected: {len(all_items)}")
     return all_items
 
 def filter_and_paginate_df(df, search_query, page, page_size):
@@ -1186,7 +1183,7 @@ def pagination_controls(total_items, page_size):
             st.rerun(scope="fragment")
 
 def products_page():
-    """Products page with improved state management and pagination"""
+    """Products page with improved state management"""
     st.title("📦 Products")
     
     # Initialize state
@@ -1202,20 +1199,16 @@ def products_page():
         st.error("Please authenticate first")
         return
     
-    # Search input with session state
+    # Search input
     search = st.text_input(
         "🔍 Search products by name or SKU",
-        value=st.session_state.get("product_search", ""),
         key="search_input"
     )
     
     # Reset button
-    col1, col2 = st.columns([1, 5])
-    with col1:
-        if st.button("🔄 Reset Product List"):
-            st.session_state.all_products_df = None
-            st.session_state.product_page = 1
-            st.rerun()
+    if st.button("🔄 Reset Product List"):
+        st.session_state.all_products_df = None
+        st.rerun()
     
     # Fetch products if needed
     if st.session_state.all_products_df is None:
@@ -1226,7 +1219,6 @@ def products_page():
                 CLIENT_SECRET,
                 SHOP_ID
             )
-            
             if items:
                 table_data = []
                 for item in items:
@@ -1247,14 +1239,15 @@ def products_page():
                             "Product Name": item.get("item_name", ""),
                             "SKU": item.get("item_sku", ""),
                             "Stock": stock_info,
-                            "Price": price_info.get("current_price", 0) / 100000,  # Convert to proper currency
+                            "Price": price_info.get("current_price", 0),
                             "Status": item.get("item_status", ""),
-                            "Tag": ""
+                            "Tag": ""  # Initialize empty tag
                         })
                     except Exception as e:
                         st.error(f"Error processing item: {str(e)}")
                 
                 if table_data:
+                    # Create DataFrame and load initial tags
                     st.session_state.all_products_df = pd.DataFrame(table_data)
                     tags = db.get_product_tags()
                     st.session_state.all_products_df['Tag'] = \
@@ -1272,15 +1265,25 @@ def products_page():
                 df['SKU'].str.lower().str.contains(search, na=False)
             ]
         
-        # Display total count
-        st.write(f"Total products: {len(df)}")
-        
         # Use fragments for table display
         products_table(df, db)
         
         if len(df) > 0:
             # Pagination controls
-            pagination_controls(len(df), 50)
+            total_pages = (len(df) + 49) // 50
+            cols = st.columns(5)
+            with cols[1]:
+                if st.button("⬅️ Previous", disabled=st.session_state.product_page==1):
+                    st.session_state.product_page = max(1, st.session_state.product_page - 1)
+                    st.rerun(scope="fragment")
+            
+            with cols[2]:
+                st.write(f"Page {st.session_state.product_page} of {total_pages}")
+            
+            with cols[3]:
+                if st.button("Next ➡️", disabled=st.session_state.product_page >= total_pages):
+                    st.session_state.product_page = min(total_pages, st.session_state.product_page + 1)
+                    st.rerun(scope="fragment")
 
 
 def main():
