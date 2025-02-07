@@ -1015,44 +1015,61 @@ def fetch_all_products(access_token, client_id, client_secret, shop_id):
     page_size = 100
     offset = 0
     
-    while True:
-        products_response = get_products(
-            access_token=access_token,
-            client_id=client_id,
-            client_secret=client_secret,
-            shop_id=shop_id,
-            offset=offset,
-            page_size=page_size
-        )
-        
-        if not products_response or "response" not in products_response:
-            break
-            
-        items = products_response["response"].get("item", [])
-        if not items:
-            break
-        
-        # Get details for this batch
-        item_ids = [str(item["item_id"]) for item in items]
-        details_response = get_item_base_info(
-            access_token=access_token,
-            client_id=client_id,
-            client_secret=client_secret,
-            shop_id=shop_id,
-            item_ids=item_ids
-        )
-        
-        if details_response and "response" in details_response:
-            if "item_list" in details_response["response"]:
-                batch_items = details_response["response"]["item_list"]
-                all_items.extend(batch_items)
-        
-        if len(items) < page_size:
-            break
-            
-        offset += page_size
-        time.sleep(0.5)  # Prevent rate limiting
+    products_response = get_products(
+        access_token=access_token,
+        client_id=client_id,
+        client_secret=client_secret,
+        shop_id=shop_id,
+        offset=offset,
+        page_size=page_size
+    )
     
+    if not products_response or "response" not in products_response:
+        st.error("Failed to get products response")
+        return []
+        
+    items = products_response["response"].get("item", [])
+    st.write(f"Debug: Found {len(items)} items in first page")
+    
+    if not items:
+        st.warning("No items found in the shop")
+        return []
+    
+    # Get details in smaller batches
+    batch_size = 50# Even smaller batch size
+    for i in range(0, len(items), batch_size):
+        batch_items = items[i:i + batch_size]
+        item_ids = [str(item["item_id"]) for item in batch_items]
+        
+        st.write(f"Debug: Getting details for batch {i//batch_size + 1}, {len(item_ids)} items")
+        time.sleep(1)  # Add more delay between batches
+        
+        try:
+            details_response = get_item_base_info(
+                access_token=access_token,
+                client_id=client_id,
+                client_secret=client_secret,
+                shop_id=shop_id,
+                item_ids=item_ids
+            )
+            
+            if details_response and "response" in details_response:
+                if "item_list" in details_response["response"]:
+                    batch_items = details_response["response"]["item_list"]
+                    all_items.extend(batch_items)
+                    st.write(f"Debug: Successfully added {len(batch_items)} items")
+                else:
+                    st.write("Debug: No item_list in response:", details_response["response"])
+            else:
+                st.write("Debug: Invalid response structure:", details_response)
+                
+        except Exception as e:
+            st.error(f"Error fetching batch {i//batch_size + 1}: {str(e)}")
+            continue
+            
+        time.sleep(0.5)
+    
+    st.write(f"Debug: Total items collected: {len(all_items)}")
     return all_items
 
 def filter_and_paginate_df(df, search_query, page, page_size):
@@ -1097,7 +1114,7 @@ def on_tag_change(edited_rows, current_df, db):
 
 
 def products_page():
-    """Products page with 200 items per page"""
+    """Products page with improved error handling"""
     st.title("📦 Products")
     
     # Initialize state
@@ -1135,16 +1152,22 @@ def products_page():
             )
             
             if items:
+                st.write(f"Debug: Processing {len(items)} items into DataFrame")
                 # Prepare data for table
                 table_data = []
                 for item in items:
                     try:
+                        # Get the first price info or use defaults
                         price_info = (item.get("price_info") or [{}])[0]
+                        
+                        # Handle potential missing nested structures
                         stock_info = (
                             item.get("stock_info_v2", {})
                             .get("summary_info", {})
                             .get("total_available_stock", 0)
                         )
+                        
+                        # Get the first image or use empty string
                         image_url = (
                             item.get("image", {})
                             .get("image_url_list", [""])[0]
@@ -1160,10 +1183,16 @@ def products_page():
                             "Tag": ""
                         })
                     except Exception as e:
-                        continue
+                        st.write(f"Debug: Error processing item: {str(e)}")
+                        st.write("Debug: Problem item:", item)
                 
                 if table_data:
                     st.session_state.all_products_df = pd.DataFrame(table_data)
+                    st.write(f"Debug: Created DataFrame with {len(table_data)} rows")
+                else:
+                    st.error("No data to create DataFrame")
+            else:
+                st.error("No items returned from fetch_all_products")
     
     # Display products
     if st.session_state.all_products_df is not None and not st.session_state.all_products_df.empty:
@@ -1184,7 +1213,7 @@ def products_page():
         total_items = len(df)
         
         if total_items > 0:
-            page_size = 200  # Show 200 items per page
+            page_size = 50
             page = st.session_state.product_page
             
             # Apply pagination
@@ -1244,7 +1273,7 @@ def products_page():
         else:
             st.info("No products found matching your search.")
     else:
-        st.info("Loading products...")
+        st.info("No products loaded yet.")
 
 
 def main():
