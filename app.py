@@ -116,10 +116,11 @@ class OrderDatabase:
             self.connect()
             self.cursor.execute("""
                 INSERT INTO shopee_token (
-                    access_token, refresh_token, expire_in, fetch_time, 
-                    shop_id, merchant_id, updated_at
+                    access_token, refresh_token, expire_in, fetch_time,
+                    shop_id, merchant_id, refresh_token_expire_in,
+                    refresh_token_fetch_time, updated_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                 ON CONFLICT (id) DO UPDATE SET
                     access_token = EXCLUDED.access_token,
                     refresh_token = EXCLUDED.refresh_token,
@@ -127,6 +128,8 @@ class OrderDatabase:
                     fetch_time = EXCLUDED.fetch_time,
                     shop_id = EXCLUDED.shop_id,
                     merchant_id = EXCLUDED.merchant_id,
+                    refresh_token_expire_in = EXCLUDED.refresh_token_expire_in,
+                    refresh_token_fetch_time = EXCLUDED.refresh_token_fetch_time,
                     updated_at = CURRENT_TIMESTAMP
                 RETURNING id
             """, (
@@ -136,6 +139,8 @@ class OrderDatabase:
                 token_data.get("fetch_time", int(time.time())),
                 token_data.get("shop_id", SHOP_ID),
                 token_data.get("merchant_id"),
+                token_data.get("refresh_token_expire_in", 365 * 24 * 60 * 60),  # Default 1 year
+                token_data.get("refresh_token_fetch_time", int(time.time())),
             ))
             self.conn.commit()
             return self.cursor.fetchone()["id"]
@@ -728,43 +733,7 @@ def handle_authentication(db):
                     return False
         return False
     return True
-
-class OrderDatabase:
-    def save_token(self, token_data):
-        try:
-            self.connect()
-            self.cursor.execute("""
-                INSERT INTO shopee_token (
-                    access_token, refresh_token, expire_in, fetch_time,
-                    shop_id, merchant_id, refresh_token_expire_in,
-                    refresh_token_fetch_time, updated_at
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                ON CONFLICT (id) DO UPDATE SET
-                    access_token = EXCLUDED.access_token,
-                    refresh_token = EXCLUDED.refresh_token,
-                    expire_in = EXCLUDED.expire_in,
-                    fetch_time = EXCLUDED.fetch_time,
-                    shop_id = EXCLUDED.shop_id,
-                    merchant_id = EXCLUDED.merchant_id,
-                    refresh_token_expire_in = EXCLUDED.refresh_token_expire_in,
-                    refresh_token_fetch_time = EXCLUDED.refresh_token_fetch_time,
-                    updated_at = CURRENT_TIMESTAMP
-                RETURNING id
-            """, (
-                token_data["access_token"],
-                token_data["refresh_token"],
-                token_data["expire_in"],
-                token_data.get("fetch_time", int(time.time())),
-                token_data.get("shop_id", SHOP_ID),
-                token_data.get("merchant_id"),
-                token_data.get("refresh_token_expire_in", 365 * 24 * 60 * 60),  # Default 1 year
-                token_data.get("refresh_token_fetch_time", int(time.time())),
-            ))
-            self.conn.commit()
-            return self.cursor.fetchone()["id"]
-        finally:
-            self.close()
+    
 
 def check_token_validity(db):
     """Check if the stored token is valid and refresh if needed"""
