@@ -538,6 +538,17 @@ def initialize_session_state():
         st.session_state.show_preorders = False
 
 
+def initialize_product_state():
+    if "product_page" not in st.session_state:
+        st.session_state.product_page = 1
+    if "product_search" not in st.session_state:
+        st.session_state.product_search = ""
+    if "products_cache" not in st.session_state:
+        st.session_state.products_cache = {}
+    if "product_tags" not in st.session_state:
+        st.session_state.product_tags = {}
+    if "products_df" not in st.session_state:
+        st.session_state.products_df = None
 
 def on_data_change():
     """Handle changes in the data editor"""
@@ -1022,168 +1033,76 @@ def handle_data_editor_changes(edited_df, db):
         st.session_state.last_edited_df = edited_df.copy()
 
 
-def handle_product_table_edits(edited_df, original_df, db):
-    """Handle tag updates with proper data type conversion"""
-    if "edited_rows" in st.session_state.products_editor:
-        for idx, changes in st.session_state.products_editor["edited_rows"].items():
-            if "Tag" in changes:
-                idx = int(idx)
-                sku = edited_df.iloc[idx]["SKU"]
-                new_tag = str(changes["Tag"]) if pd.notna(changes["Tag"]) else ""
-                db.upsert_product_tag(sku, new_tag)
-                st.toast("✅ Tags updated!")
 
-@st.fragment 
-def products_table(access_token, client_id, client_secret, shop_id, search_keyword, page, page_size):
-    """Fragment for the products table with caching"""
-    # Create a cache key based on the search and pagination parameters
-    cache_key = f"products_{search_keyword}_{page}_{page_size}"
-    
-    if "products_cache" not in st.session_state:
-        st.session_state.products_cache = {}
-    
-    # Check if we have cached data
-    if cache_key in st.session_state.products_cache:
-        return st.session_state.products_cache[cache_key]
-    
-    db = OrderDatabase()
+
+
+
+
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def fetch_products_data(access_token, client_id, client_secret, shop_id, search_keyword, page, page_size):
+    """Fetch products with caching"""
     offset = (page - 1) * page_size
     
-    with st.spinner("Loading products..."):
-        products_response = get_products(
-            access_token=access_token,
-            client_id=client_id,
-            client_secret=client_secret,
-            shop_id=shop_id,
-            offset=offset,
-            page_size=page_size,
-            search_keyword=search_keyword
-        )
-    
-        if not products_response or "response" not in products_response:
-            return None, 0
-            
-        items = products_response["response"].get("item", [])
-        total = products_response["response"].get("total_count", 0)
-        
-        if not items:
-            return None, 0
-            
-        # Get item details and process as before
-        item_ids = [item["item_id"] for item in items]
-        details_response = get_item_base_info(
-            access_token=access_token,
-            client_id=client_id,
-            client_secret=client_secret,
-            shop_id=shop_id,
-            item_ids=item_ids
-        )
-        
-        if not details_response or "response" not in details_response:
-            return None, 0
-            
-        # Get existing tags
-        product_tags = db.get_product_tags()
-        
-        # Prepare data for table
-        table_data = []
-        for item in details_response["response"].get("item_list", []):
-            price_info = item.get("price_info", [{}])[0]
-            stock_info = item.get("stock_info_v2", {}).get("summary_info", {})
-            image_url = item.get("image", {}).get("image_url_list", [""])[0]
-            
-            table_data.append({
-                "Image": image_url,
-                "Product Name": item.get("item_name", ""),
-                "SKU": item.get("item_sku", ""),
-                "Stock": stock_info.get("total_available_stock", 0),
-                "Price": price_info.get("current_price", 0),
-                "Status": item.get("item_status", ""),
-                "Tag": product_tags.get(item.get("item_sku", ""), "")
-            })
-        
-        df = pd.DataFrame(table_data)
-        result = (df, total)
-        
-        # Cache the results
-        st.session_state.products_cache[cache_key] = result
-        return result
-
-@st.fragment
-def product_table_editor(df):
-    """Fragment for the product table editor with improved state handling"""
-    if df is None:
-        return df
-        
-    column_config = {
-        "Image": st.column_config.ImageColumn("Image", width="small"),
-        "Product Name": st.column_config.TextColumn("Product Name", width="medium"),
-        "SKU": st.column_config.TextColumn("SKU", width="small"),
-        "Stock": st.column_config.NumberColumn("Stock", width="small"),
-        "Price": st.column_config.NumberColumn("Price", width="small", format="$%.2f"),
-        "Status": st.column_config.TextColumn("Status", width="small"),
-        "Tag": st.column_config.TextColumn("Tag", width="small")
-    }
-    
-    # Initialize last_edited_products in session state if not present
-    if "last_edited_products" not in st.session_state:
-        st.session_state.last_edited_products = df.copy()
-    
-    edited_df = st.data_editor(
-        df,
-        column_config=column_config,
-        use_container_width=True,
-        num_rows="fixed",
-        disabled=["Image", "Product Name", "SKU", "Stock", "Price", "Status"],
-        key="products_editor"
+    products_response = get_products(
+        access_token=access_token,
+        client_id=client_id,
+        client_secret=client_secret,
+        shop_id=shop_id,
+        offset=offset,
+        page_size=page_size,
+        search_keyword=search_keyword
     )
     
-    # Only process changes if there are actual edits
-    if "edited_rows" in st.session_state.products_editor:
-        db = OrderDatabase()
-        changes_made = False
+    if not products_response or "response" not in products_response:
+        return None, 0
         
-        for idx_str, changes in st.session_state.products_editor["edited_rows"].items():
-            if "Tag" in changes:
-                idx = int(idx_str)
-                sku = edited_df.iloc[idx]["SKU"]
-                new_tag = str(changes["Tag"]) if pd.notna(changes["Tag"]) else ""
-                old_tag = st.session_state.last_edited_products.iloc[idx]["Tag"]
-                
-                # Only update if tag actually changed
-                if new_tag != old_tag:
-                    db.upsert_product_tag(sku, new_tag)
-                    changes_made = True
-        
-        if changes_made:
-            st.toast("✅ Tags updated!")
-            # Update the last edited state
-            st.session_state.last_edited_products = edited_df.copy()
+    items = products_response["response"].get("item", [])
+    total = products_response["response"].get("total_count", 0)
     
-    return edited_df
+    if not items:
+        return None, 0
+        
+    item_ids = [item["item_id"] for item in items]
+    details_response = get_item_base_info(
+        access_token=access_token,
+        client_id=client_id,
+        client_secret=client_secret,
+        shop_id=shop_id,
+        item_ids=item_ids
+    )
+    
+    if not details_response or "response" not in details_response:
+        return None, 0
+    
+    return details_response["response"].get("item_list", []), total
 
-@st.fragment
-def pagination_controls(current_page, total_items, page_size):
-    """Fragment for pagination controls"""
-    total_pages = (total_items + page_size - 1) // page_size
-    cols = st.columns(5)
+def on_tag_change(edited_rows, current_df, db):
+    """Handle tag changes without causing a full rerun"""
+    changes_made = False
     
-    with cols[1]:
-        if st.button("⬅️ Previous", disabled=current_page==1):
-            st.session_state.product_page = max(1, current_page - 1)
-            st.rerun()
+    for idx_str, changes in edited_rows.items():
+        if "Tag" in changes:
+            idx = int(idx_str)
+            sku = current_df.iloc[idx]["SKU"]
+            new_tag = str(changes["Tag"]) if pd.notna(changes["Tag"]) else ""
+            current_tag = st.session_state.product_tags.get(sku, "")
+            
+            if new_tag != current_tag:
+                db.upsert_product_tag(sku, new_tag)
+                st.session_state.product_tags[sku] = new_tag
+                changes_made = True
     
-    with cols[2]:
-        st.write(f"Page {current_page} of {total_pages}")
-        
-    with cols[3]:
-        if st.button("Next ➡️", disabled=current_page >= total_pages):
-            st.session_state.product_page = min(total_pages, current_page + 1)
-            st.rerun()
+    if changes_made:
+        st.toast("✅ Tags updated!")
+
+
 
 def products_page():
-    """Updated products page with better state management"""
+    """Products page with optimized state management"""
     st.title("📦 Products")
+    
+    # Initialize state
+    initialize_product_state()
     
     db = OrderDatabase()
     token = db.load_token()
@@ -1192,41 +1111,109 @@ def products_page():
         st.error("Please authenticate first")
         return
     
-    # Initialize session state for search if needed
-    if "product_search" not in st.session_state:
-        st.session_state.product_search = ""
+    # Load product tags once
+    if not st.session_state.product_tags:
+        st.session_state.product_tags = db.get_product_tags()
     
-    # Search input with debouncing
+    # Search with debouncing
     search = st.text_input(
         "🔍 Search products by name or item number",
-        key="product_search",
-        on_change=lambda: setattr(st.session_state, "products_cache", {})  # Clear cache on search change
+        value=st.session_state.product_search,
+        key="search_input"
     )
+    
+    # Only update search state and clear cache if search actually changed
+    if search != st.session_state.product_search:
+        st.session_state.product_search = search
+        st.session_state.products_cache = {}
+        st.session_state.products_df = None
     
     page_size = 50
-    if "product_page" not in st.session_state:
-        st.session_state.product_page = 1
     page = st.session_state.product_page
     
-    # Get products data using fragment with caching
-    df, total_items = products_table(
-        token["access_token"],
-        CLIENT_ID,
-        CLIENT_SECRET,
-        SHOP_ID,
-        search,
-        page,
-        page_size
-    )
+    # Fetch products if needed
+    if st.session_state.products_df is None:
+        with st.spinner("Loading products..."):
+            items, total = fetch_products_data(
+                token["access_token"],
+                CLIENT_ID,
+                CLIENT_SECRET,
+                SHOP_ID,
+                search,
+                page,
+                page_size
+            )
+            
+            if items is not None:
+                # Prepare data for table
+                table_data = []
+                for item in items:
+                    price_info = item.get("price_info", [{}])[0]
+                    stock_info = item.get("stock_info_v2", {}).get("summary_info", {})
+                    image_url = item.get("image", {}).get("image_url_list", [""])[0]
+                    sku = item.get("item_sku", "")
+                    
+                    table_data.append({
+                        "Image": image_url,
+                        "Product Name": item.get("item_name", ""),
+                        "SKU": sku,
+                        "Stock": stock_info.get("total_available_stock", 0),
+                        "Price": price_info.get("current_price", 0),
+                        "Status": item.get("item_status", ""),
+                        "Tag": st.session_state.product_tags.get(sku, "")
+                    })
+                
+                st.session_state.products_df = pd.DataFrame(table_data)
+                st.session_state.total_items = total
     
-    if df is not None:
-        st.write(f"Showing {len(df)} of {total_items} products")
+    # Display products if available
+    if st.session_state.products_df is not None:
+        st.write(f"Showing {len(st.session_state.products_df)} of {st.session_state.total_items} products")
         
-        # Display and handle product table editing using improved fragment
-        edited_df = product_table_editor(df)
+        # Configure table
+        column_config = {
+            "Image": st.column_config.ImageColumn("Image", width="small"),
+            "Product Name": st.column_config.TextColumn("Product Name", width="medium"),
+            "SKU": st.column_config.TextColumn("SKU", width="small"),
+            "Stock": st.column_config.NumberColumn("Stock", width="small"),
+            "Price": st.column_config.NumberColumn("Price", width="small", format="$%.2f"),
+            "Status": st.column_config.TextColumn("Status", width="small"),
+            "Tag": st.column_config.TextColumn("Tag", width="small")
+        }
         
-        # Handle pagination
-        pagination_controls(page, total_items, page_size)
+        # Display editor with callback
+        edited_df = st.data_editor(
+            st.session_state.products_df,
+            column_config=column_config,
+            use_container_width=True,
+            num_rows="fixed",
+            disabled=["Image", "Product Name", "SKU", "Stock", "Price", "Status"],
+            key="products_editor",
+            on_change=lambda: on_tag_change(
+                st.session_state.products_editor.get("edited_rows", {}),
+                st.session_state.products_df,
+                db
+            )
+        )
+        
+        # Pagination
+        total_pages = (st.session_state.total_items + page_size - 1) // page_size
+        cols = st.columns(5)
+        
+        with cols[1]:
+            if st.button("⬅️ Previous", disabled=page==1, key="prev_button"):
+                st.session_state.product_page = max(1, page - 1)
+                st.session_state.products_df = None  # Force refresh
+                st.rerun()
+        
+        with cols[2]:
+            st.write(f"Page {page} of {total_pages}")
+            
+        with cols[3]:
+            if st.button("Next ➡️", disabled=page >= total_pages, key="next_button"):
+                st.session_state.product_page = min(total_pages, page + 1)
+                st.session_state.products_df = None  # Force refresh
+                st.rerun()
 
 def main():
     st.set_page_config(page_title="Order Management", layout="wide")
