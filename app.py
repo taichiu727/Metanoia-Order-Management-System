@@ -60,7 +60,7 @@ class OrderDatabase:
         try:
             self.connect()
             self.cursor.execute("""
-                CREATE TABLE IF NOT EXISTㄋ order_tracking (
+                CREATE TABLE IF NOT EXISTS order_tracking (
                     order_sn VARCHAR(50),
                     product_name TEXT,
                     item_spec TEXT,
