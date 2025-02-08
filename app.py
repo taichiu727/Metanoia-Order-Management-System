@@ -842,6 +842,82 @@ def sidebar_controls():
             st.session_state.clear()
             st.rerun()
 
+@st.cache_data
+def get_column_config():
+    return {
+        "Order Number": st.column_config.TextColumn("Order Number", width="small"),
+        "Created": st.column_config.TextColumn("Created", width="small"),
+        "Deadline": st.column_config.TextColumn("Deadline", width="small"),
+        "Product": st.column_config.TextColumn("Product", width="medium"),
+        "Item Spec": st.column_config.TextColumn("Item Spec", width="small"),
+        "Item Number": st.column_config.TextColumn("Item Number", width="small"),
+        "Quantity": st.column_config.NumberColumn("Quantity", width="small"),
+        "Image": st.column_config.ImageColumn("Image", width="small"),
+        "Tag": st.column_config.TextColumn("Tag", width="small"),
+        "Received": st.column_config.CheckboxColumn("Received", width="small", default=False),
+        "Missing": st.column_config.NumberColumn("Missing", width="small", default=0),
+        "Note": st.column_config.TextColumn("Note", width="medium", default="")
+    }
+
+@st.fragment
+def order_editor(order_data, order_num, filtered_df, db):
+    all_received = all(order_data['Received'])
+    status_emoji = "✅" if all_received else "⚠️" if any(order_data['Received']) else "❌"
+    
+    with st.expander(f"Order: {order_num} {status_emoji}", expanded=True):
+        editor_key = f"order_{order_num}"
+        
+        display_data = order_data[["Order Number", "Created", "Deadline", "Product", 
+                                "Item Spec", "Item Number", "Quantity", "Image", 
+                                "Received", "Missing", "Note", "Tag"]]
+        
+        edited_df = st.data_editor(
+            display_data,
+            column_config=get_column_config(),
+            use_container_width=True,
+            key=editor_key,
+            num_rows="fixed",
+            disabled=["Order Number", "Created", "Deadline", "Product", 
+                     "Item Spec", "Item Number", "Quantity", "Image", "Tag"]
+        )
+        
+        if editor_key in st.session_state and "edited_rows" in st.session_state[editor_key]:
+            edited_rows = st.session_state[editor_key]["edited_rows"]
+            if edited_rows:
+                batch_records = []
+                for idx_str, changes in edited_rows.items():
+                    idx = int(idx_str)
+                    row = edited_df.iloc[idx]
+                    
+                    received = changes.get("Received", row["Received"])
+                    missing = changes.get("Missing", row["Missing"])
+                    note = changes.get("Note", row["Note"])
+                    
+                    batch_records.append((
+                        str(row["Order Number"]),
+                        str(row["Product"]),
+                        str(row["Item Spec"]),
+                        bool(received),
+                        int(missing) if pd.notna(missing) else 0,
+                        str(note) if pd.notna(note) else ""
+                    ))
+                    
+                    mask = (filtered_df['Order Number'] == row['Order Number']) & \
+                           (filtered_df['Product'] == row['Product']) & \
+                           (filtered_df['Item Spec'] == row['Item Spec'])
+                    filtered_df.loc[mask, 'Received'] = received
+                    filtered_df.loc[mask, 'Missing'] = missing
+                    filtered_df.loc[mask, 'Note'] = note
+                
+                if batch_records:
+                    try:
+                        db.batch_upsert_order_tracking(batch_records)
+                        st.toast("✅ Changes saved!")
+                    except Exception as e:
+                        st.error(f"Error saving changes: {str(e)}")
+                        
+                st.session_state[editor_key]["edited_rows"] = {}
+
 @st.fragment
 def orders_table(filtered_df):
     if filtered_df.empty:
@@ -853,135 +929,13 @@ def orders_table(filtered_df):
     if 'product_tags' not in st.session_state:
         st.session_state.product_tags = db.get_product_tags()
     
-    # Cache column config
-    if 'column_config' not in st.session_state:
-        st.session_state.column_config = {
-            "Order Number": st.column_config.TextColumn("Order Number", width="small"),
-            "Created": st.column_config.TextColumn("Created", width="small"),
-            "Deadline": st.column_config.TextColumn("Deadline", width="small"),
-            "Product": st.column_config.TextColumn("Product", width="medium"),
-            "Item Spec": st.column_config.TextColumn("Item Spec", width="small"),
-            "Item Number": st.column_config.TextColumn("Item Number", width="small"),
-            "Quantity": st.column_config.NumberColumn("Quantity", width="small"),
-            "Image": st.column_config.ImageColumn("Image", width="small"),
-            "Tag": st.column_config.TextColumn("Tag", width="small"),
-            "Received": st.column_config.CheckboxColumn("Received", width="small", default=False),
-            "Missing": st.column_config.NumberColumn("Missing", width="small", default=0),
-            "Note": st.column_config.TextColumn("Note", width="medium", default="")
-        }
-    
-    # Add tags column if not present
     if 'Tag' not in filtered_df.columns:
         filtered_df['Tag'] = filtered_df['Item Number'].map(lambda x: st.session_state.product_tags.get(x, ''))
 
-    # Cache tracking data in session state and refresh periodically
-    tracking_key = 'tracking_data_timestamp'
-    if tracking_key not in st.session_state or \
-       (time.time() - st.session_state[tracking_key]) > 30:  # Refresh every 30 seconds
-        st.session_state.tracking_data = {
-            (item['order_sn'], item['product_name'], item['item_spec']): item 
-            for item in db.get_order_tracking()
-        }
-        st.session_state[tracking_key] = time.time()
-
+    # Split into individual order editors
     orders = filtered_df.groupby('Order Number')
-    
-    # Initialize changes collector
-    changes_key = 'pending_changes'
-    if changes_key not in st.session_state:
-        st.session_state[changes_key] = []
-    
     for order_num, order_data in orders:
-        all_received = all(order_data['Received'])
-        status_emoji = "✅" if all_received else "⚠️" if any(order_data['Received']) else "❌"
-        
-        with st.expander(f"Order: {order_num} {status_emoji}", expanded=True):
-            editor_key = f"order_{order_num}"
-            
-            # Create display data
-            display_data = order_data[["Order Number", "Created", "Deadline", "Product", 
-                                     "Item Spec", "Item Number", "Quantity", "Image", 
-                                     "Received", "Missing", "Note", "Tag"]]
-            
-            edited_df = st.data_editor(
-                display_data,
-                column_config=st.session_state.column_config,
-                use_container_width=True,
-                key=editor_key,
-                num_rows="fixed",
-                disabled=["Order Number", "Created", "Deadline", "Product", 
-                         "Item Spec", "Item Number", "Quantity", "Image", "Tag"]
-            )
-            
-            # Handle changes
-            if editor_key in st.session_state and "edited_rows" in st.session_state[editor_key]:
-                edited_rows = st.session_state[editor_key]["edited_rows"]
-                if edited_rows:
-                    batch_records = []
-                    df_updates = []
-                    
-                    for idx_str, changes in edited_rows.items():
-                        idx = int(idx_str)
-                        row = edited_df.iloc[idx]
-                        
-                        # Only process if there are actual changes
-                        if any(field in changes for field in ["Received", "Missing", "Note"]):
-                            received = changes.get("Received", row["Received"])
-                            missing = changes.get("Missing", row["Missing"])
-                            note = changes.get("Note", row["Note"])
-                            
-                            # Prepare batch record
-                            batch_records.append((
-                                str(row["Order Number"]),
-                                str(row["Product"]),
-                                str(row["Item Spec"]),
-                                bool(received),
-                                int(missing) if pd.notna(missing) else 0,
-                                str(note) if pd.notna(note) else ""
-                            ))
-                            
-                            # Prepare DataFrame update
-                            df_updates.append({
-                                'mask': (filtered_df['Order Number'] == row['Order Number']) & 
-                                       (filtered_df['Product'] == row['Product']) & 
-                                       (filtered_df['Item Spec'] == row['Item Spec']),
-                                'updates': {
-                                    'Received': received,
-                                    'Missing': missing,
-                                    'Note': note
-                                }
-                            })
-                    
-                    # Process all changes at once
-                    if batch_records:
-                        try:
-                            # Update database
-                            db.batch_upsert_order_tracking(batch_records)
-                            
-                            # Update DataFrame efficiently
-                            for update in df_updates:
-                                filtered_df.loc[update['mask'], list(update['updates'].keys())] = \
-                                    list(update['updates'].values())
-                            
-                            # Update tracking data cache
-                            for record in batch_records:
-                                key = (record[0], record[1], record[2])
-                                st.session_state.tracking_data[key] = {
-                                    'order_sn': record[0],
-                                    'product_name': record[1],
-                                    'item_spec': record[2],
-                                    'received': record[3],
-                                    'missing_count': record[4],
-                                    'note': record[5]
-                                }
-                            
-                            st.toast("✅ Changes saved!")
-                            
-                        except Exception as e:
-                            st.error(f"Error saving changes: {str(e)}")
-                    
-                    # Clear edited rows after processing
-                    st.session_state[editor_key]["edited_rows"] = {}
+        order_editor(order_data, order_num, filtered_df, db)
 
     return filtered_df
 
