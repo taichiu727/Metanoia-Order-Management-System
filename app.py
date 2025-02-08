@@ -550,6 +550,8 @@ def initialize_session_state():
         st.session_state.status_filter = "All"
     if "show_preorders" not in st.session_state:
         st.session_state.show_preorders = False
+    if "active_tab" not in st.session_state:
+        st.session_state.active_tab = "Orders"
 
 
 def initialize_product_state():
@@ -1253,12 +1255,18 @@ def pagination_controls(total_items, page_size):
 def products_page():
     """Products page with improved state management"""
     st.title("📦 Products")
+
+    # Only proceed if this is the active tab
+    if st.session_state.active_tab != "Products":
+        return
     
     # Initialize state
     if "all_products_df" not in st.session_state:
         st.session_state.all_products_df = None
     if "product_page" not in st.session_state:
         st.session_state.product_page = 1
+    
+
     
     db = OrderDatabase()
     token = db.load_token()
@@ -1374,6 +1382,8 @@ def main():
     tab1, tab2 = st.tabs(["Orders", "Products"])
     
     with tab1:
+        if st._current_tab_id == tab1._key:  # This checks if tab1 is active
+            st.session_state.active_tab = "Orders"
         # Fetch and process orders if needed
         if st.session_state.orders_need_refresh:
             st.session_state.orders_df = fetch_and_process_orders(token, db)
@@ -1397,7 +1407,11 @@ def main():
             st.info("No orders found in the selected time range.")
     
     with tab2:
-        products_page()
+        if st._current_tab_id == tab2._key:  # This checks if tab2 is active
+            st.session_state.active_tab = "Products"
+            # Only load products page when Products tab is active
+            products_page()
+        
 
 if __name__ == "__main__":
     main()
