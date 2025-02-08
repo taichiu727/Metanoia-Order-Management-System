@@ -846,13 +846,16 @@ def orders_table(filtered_df):
 
     db = OrderDatabase()
     
-    # Store product tags in session state to avoid repeated database calls
+    # Store product tags in session state
     if 'product_tags' not in st.session_state:
         st.session_state.product_tags = db.get_product_tags()
     
-    # Add tags column if not already present
+    # Add tags column if not present
     if 'Tag' not in filtered_df.columns:
         filtered_df['Tag'] = filtered_df['Item Number'].map(lambda x: st.session_state.product_tags.get(x, ''))
+
+    # Initialize batch changes list
+    all_changes = []
 
     orders = filtered_df.groupby('Order Number')
     
@@ -882,11 +885,10 @@ def orders_table(filtered_df):
             
             editor_key = f"order_{order_num}"
             
-            # Use a unique key for the editor state
-            state_key = f"{editor_key}_state"
-            if state_key not in st.session_state:
-                st.session_state[state_key] = {
-                    'data': product_df.copy(),
+            # Initialize the editor state if not exists
+            if f"{editor_key}_state" not in st.session_state:
+                st.session_state[f"{editor_key}_state"] = {
+                    'previous_data': product_df.copy(),
                     'edited_rows': {}
                 }
             
@@ -902,39 +904,61 @@ def orders_table(filtered_df):
             
             # Handle changes
             if editor_key in st.session_state and "edited_rows" in st.session_state[editor_key]:
-                edited_rows = st.session_state[editor_key]["edited_rows"]
+                current_edited_rows = st.session_state[editor_key]["edited_rows"]
+                prev_state = st.session_state[f"{editor_key}_state"]
                 
-                if edited_rows and edited_rows != st.session_state[state_key]['edited_rows']:
-                    st.session_state[state_key]['edited_rows'] = edited_rows.copy()
-                    
-                    for idx_str, changes in edited_rows.items():
+                if current_edited_rows and current_edited_rows != prev_state['edited_rows']:
+                    # Process all changes for this order
+                    for idx_str, changes in current_edited_rows.items():
                         idx = int(idx_str)
                         row = edited_df.iloc[idx]
                         
-                        # Only process if there are actual changes
-                        if any(field in changes for field in ["Received", "Missing", "Note"]):
-                            received = changes.get("Received", row["Received"])
-                            missing = changes.get("Missing", row["Missing"])
-                            note = changes.get("Note", row["Note"])
-                            
-                            # Update database
-                            db.upsert_order_tracking(
-                                order_sn=str(row["Order Number"]),
-                                product_name=str(row["Product"]),
-                                received=bool(received),
-                                missing_count=int(missing) if pd.notna(missing) else 0,
-                                note=str(note) if pd.notna(note) else ""
-                            )
-                            
-                            # Update DataFrame without triggering rerun
-                            mask = (filtered_df['Order Number'] == row['Order Number']) & \
-                                  (filtered_df['Product'] == row['Product']) & \
-                                  (filtered_df['Item Spec'] == row['Item Spec'])
-                            filtered_df.loc[mask, 'Received'] = received
-                            filtered_df.loc[mask, 'Missing'] = missing
-                            filtered_df.loc[mask, 'Note'] = note
+                        # Get the current values
+                        received = changes.get("Received", row["Received"])
+                        missing = changes.get("Missing", row["Missing"])
+                        note = changes.get("Note", row["Note"])
+                        
+                        # Add to batch changes
+                        all_changes.append({
+                            'order_sn': str(row["Order Number"]),
+                            'product_name': str(row["Product"]),
+                            'received': bool(received),
+                            'missing_count': int(missing) if pd.notna(missing) else 0,
+                            'note': str(note) if pd.notna(note) else "",
+                            'mask': (filtered_df['Order Number'] == row['Order Number']) & 
+                                   (filtered_df['Product'] == row['Product']) & 
+                                   (filtered_df['Item Spec'] == row['Item Spec'])
+                        })
                     
-                    st.toast("✅ Changes saved!")
+                    # Update previous state
+                    st.session_state[f"{editor_key}_state"]['edited_rows'] = current_edited_rows.copy()
+                    st.session_state[f"{editor_key}_state"]['previous_data'] = edited_df.copy()
+
+    # Process all changes at once
+    if all_changes:
+        try:
+            # Prepare batch records for database update
+            batch_records = [
+                (change['order_sn'], change['product_name'], 
+                 change['received'], change['missing_count'], 
+                 change['note'])
+                for change in all_changes
+            ]
+            
+            # Update database in one batch
+            db.batch_upsert_order_tracking(batch_records)
+            
+            # Update DataFrame
+            for change in all_changes:
+                mask = change['mask']
+                filtered_df.loc[mask, 'Received'] = change['received']
+                filtered_df.loc[mask, 'Missing'] = change['missing_count']
+                filtered_df.loc[mask, 'Note'] = change['note']
+            
+            st.toast("✅ Changes saved!")
+            
+        except Exception as e:
+            st.error(f"Error saving changes: {str(e)}")
 
     return filtered_df
 
