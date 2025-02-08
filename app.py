@@ -839,6 +839,7 @@ def sidebar_controls():
             st.session_state.clear()
             st.rerun()
 
+@st.fragment
 def orders_table(filtered_df):
     if filtered_df.empty:
         return filtered_df
