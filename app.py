@@ -550,8 +550,7 @@ def initialize_session_state():
         st.session_state.status_filter = "All"
     if "show_preorders" not in st.session_state:
         st.session_state.show_preorders = False
-    if "active_tab" not in st.session_state:
-        st.session_state.active_tab = "Orders"
+ 
 
 
 def initialize_product_state():
@@ -1378,38 +1377,36 @@ def main():
     # Use sidebar fragment within sidebar context
     with st.sidebar:
         sidebar_controls()
-
-    tab1, tab2 = st.tabs(["Orders", "Products"])
     
-    with tab1:
-        if st._current_tab_id == tab1._key:  # This checks if tab1 is active
-            st.session_state.active_tab = "Orders"
-        # Fetch and process orders if needed
-        if st.session_state.orders_need_refresh:
-            st.session_state.orders_df = fetch_and_process_orders(token, db)
-            st.session_state.orders_need_refresh = False
+    tabs = st.tabs(["Orders", "Products"])
 
-        if not st.session_state.orders_df.empty:
-            # Apply filters based on session state
-            filtered_df = apply_filters(
-                st.session_state.orders_df, 
-                st.session_state.get('status_filter', 'All'),
-                st.session_state.get('show_preorders', False)
-            )
-            
-            # Use fragments for main UI components
-            edited_df = orders_table(filtered_df)
-            statistics_view(edited_df)
-            
-            st.divider()
-            export_controls(edited_df)
-        else:
-            st.info("No orders found in the selected time range.")
+    active_tab = st.radio("Tabs", ["Orders", "Products"], label_visibility="hidden")
+    st.session_state.active_tab = active_tab
     
-    with tab2:
-        if st._current_tab_id == tab2._key:  # This checks if tab2 is active
-            st.session_state.active_tab = "Products"
-            # Only load products page when Products tab is active
+    with tabs[0]:
+        if active_tab == "Orders":
+            if st.session_state.orders_need_refresh:
+                st.session_state.orders_df = fetch_and_process_orders(token, db)
+                st.session_state.orders_need_refresh = False
+
+            if not st.session_state.orders_df.empty:
+                filtered_df = apply_filters(
+                    st.session_state.orders_df, 
+                    st.session_state.get('status_filter', 'All'),
+                    st.session_state.get('show_preorders', False)
+                )
+                
+                edited_df = orders_table(filtered_df)
+                statistics_view(edited_df)
+                
+                st.divider()
+                export_controls(edited_df)
+            else:
+                st.info("No orders found in the selected time range.")
+    
+    # Products tab
+    with tabs[1]:
+        if active_tab == "Products":
             products_page()
         
 
