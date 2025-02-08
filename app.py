@@ -32,6 +32,7 @@ class OrderDatabase:
                 SELECT 
                     order_sn,
                     product_name,
+                    item_spec,
                     received,
                     missing_count,
                     note
@@ -59,16 +60,19 @@ class OrderDatabase:
         try:
             self.connect()
             self.cursor.execute("""
-                CREATE TABLE IF NOT EXISTS order_tracking (
+                DROP TABLE IF EXISTS order_tracking;
+                CREATE TABLE order_tracking (
                     order_sn VARCHAR(50),
                     product_name TEXT,
+                    item_spec TEXT,
                     received BOOLEAN DEFAULT FALSE,
                     missing_count INTEGER DEFAULT 0,
                     note TEXT,
                     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    PRIMARY KEY (order_sn, product_name)
+                    PRIMARY KEY (order_sn, product_name, item_spec)
                 )
             """)
+            self.conn.commit()
 
 
             # New shopee_token table
@@ -180,19 +184,21 @@ class OrderDatabase:
         finally:
             self.close()
 
-    def upsert_order_tracking(self, order_sn, product_name, received, missing_count, note):
+    def upsert_order_tracking(self, order_sn, product_name, item_spec, received, missing_count, note):
         try:
             self.connect()
             self.cursor.execute("""
-                INSERT INTO order_tracking (order_sn, product_name, received, missing_count, note, last_updated)
-                VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                ON CONFLICT (order_sn, product_name) 
+                INSERT INTO order_tracking (
+                    order_sn, product_name, item_spec, received, missing_count, note, last_updated
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT (order_sn, product_name, item_spec) 
                 DO UPDATE SET 
                     received = EXCLUDED.received,
                     missing_count = EXCLUDED.missing_count,
                     note = EXCLUDED.note,
                     last_updated = CURRENT_TIMESTAMP
-            """, (order_sn, product_name, received, missing_count, note))
+            """, (order_sn, product_name, item_spec, received, missing_count, note))
             self.conn.commit()
         finally:
             self.close()
@@ -213,21 +219,19 @@ class OrderDatabase:
     def batch_upsert_order_tracking(self, records):
         try:
             self.connect()
-            # Add transaction management
             with self.conn:
                 self.cursor.executemany("""
-                    INSERT INTO order_tracking (order_sn, product_name, received, missing_count, note, last_updated)
-                    VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                    ON CONFLICT (order_sn, product_name) 
+                    INSERT INTO order_tracking (
+                        order_sn, product_name, item_spec, received, missing_count, note, last_updated
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (order_sn, product_name, item_spec) 
                     DO UPDATE SET 
                         received = EXCLUDED.received,
                         missing_count = EXCLUDED.missing_count,
                         note = EXCLUDED.note,
                         last_updated = CURRENT_TIMESTAMP
                 """, records)
-        except psycopg2.Error as e:
-            st.error(f"Database error: {str(e)}")
-            raise
         finally:
             self.close()
     def get_product_tags(self):
@@ -653,9 +657,9 @@ def fetch_and_process_orders(token, db):
         order_details_list.sort(key=lambda x: x['create_time'], reverse=True)
         st.session_state.order_details = order_details_list
 
-        # Process orders into DataFrame
+        # Process orders into DataFrame with item_spec in the tracking key
         tracking_data = {
-            (item['order_sn'], item['product_name']): item 
+            (item['order_sn'], item['product_name'], item['item_spec']): item 
             for item in db.get_order_tracking()
         }
         
@@ -664,7 +668,7 @@ def fetch_and_process_orders(token, db):
             if "item_list" in order_detail:
                 for item in order_detail["item_list"]:
                     tracking = tracking_data.get(
-                        (order_detail["order_sn"], item["item_name"]), 
+                        (order_detail["order_sn"], item["item_name"], item["model_name"]), 
                         {'received': False, 'missing_count': 0, 'note': ''}
                     )
                     orders_data.append({
@@ -853,6 +857,12 @@ def orders_table(filtered_df):
     if 'Tag' not in filtered_df.columns:
         filtered_df['Tag'] = filtered_df['Item Number'].map(lambda x: st.session_state.product_tags.get(x, ''))
 
+    # Get tracking data with item_spec included in the key
+    tracking_data = {
+        (item['order_sn'], item['product_name'], item['item_spec']): item 
+        for item in db.get_order_tracking()
+    }
+
     orders = filtered_df.groupby('Order Number')
     
     for order_num, order_data in orders:
@@ -901,9 +911,11 @@ def orders_table(filtered_df):
                         missing = changes.get("Missing", row["Missing"])
                         note = changes.get("Note", row["Note"])
                         
+                        # Include item_spec in the batch records
                         batch_records.append((
                             str(row["Order Number"]),
                             str(row["Product"]),
+                            str(row["Item Spec"]),  # Added item_spec
                             bool(received),
                             int(missing) if pd.notna(missing) else 0,
                             str(note) if pd.notna(note) else ""
