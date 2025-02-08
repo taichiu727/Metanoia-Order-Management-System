@@ -845,8 +845,14 @@ def orders_table(filtered_df):
         return filtered_df
 
     db = OrderDatabase()
-    product_tags = db.get_product_tags()
-    filtered_df['Tag'] = filtered_df['Item Number'].map(lambda x: product_tags.get(x, ''))
+    
+    # Store product tags in session state to avoid repeated database calls
+    if 'product_tags' not in st.session_state:
+        st.session_state.product_tags = db.get_product_tags()
+    
+    # Add tags column if not already present
+    if 'Tag' not in filtered_df.columns:
+        filtered_df['Tag'] = filtered_df['Item Number'].map(lambda x: st.session_state.product_tags.get(x, ''))
 
     orders = filtered_df.groupby('Order Number')
     
@@ -876,6 +882,14 @@ def orders_table(filtered_df):
             
             editor_key = f"order_{order_num}"
             
+            # Use a unique key for the editor state
+            state_key = f"{editor_key}_state"
+            if state_key not in st.session_state:
+                st.session_state[state_key] = {
+                    'data': product_df.copy(),
+                    'edited_rows': {}
+                }
+            
             edited_df = st.data_editor(
                 product_df,
                 column_config=column_config,
@@ -886,18 +900,19 @@ def orders_table(filtered_df):
                          "Item Spec", "Item Number", "Quantity", "Image", "Tag"]
             )
             
-            # Handle changes for this order
+            # Handle changes
             if editor_key in st.session_state and "edited_rows" in st.session_state[editor_key]:
                 edited_rows = st.session_state[editor_key]["edited_rows"]
                 
-                if edited_rows:
+                if edited_rows and edited_rows != st.session_state[state_key]['edited_rows']:
+                    st.session_state[state_key]['edited_rows'] = edited_rows.copy()
+                    
                     for idx_str, changes in edited_rows.items():
                         idx = int(idx_str)
                         row = edited_df.iloc[idx]
                         
                         # Only process if there are actual changes
                         if any(field in changes for field in ["Received", "Missing", "Note"]):
-                            # Get the updated values
                             received = changes.get("Received", row["Received"])
                             missing = changes.get("Missing", row["Missing"])
                             note = changes.get("Note", row["Note"])
@@ -911,7 +926,7 @@ def orders_table(filtered_df):
                                 note=str(note) if pd.notna(note) else ""
                             )
                             
-                            # Update DataFrame with exact matching including Item Spec
+                            # Update DataFrame without triggering rerun
                             mask = (filtered_df['Order Number'] == row['Order Number']) & \
                                   (filtered_df['Product'] == row['Product']) & \
                                   (filtered_df['Item Spec'] == row['Item Spec'])
@@ -920,8 +935,6 @@ def orders_table(filtered_df):
                             filtered_df.loc[mask, 'Note'] = note
                     
                     st.toast("✅ Changes saved!")
-                    # Clear edited rows after saving
-                    st.session_state[editor_key]["edited_rows"] = {}
 
     return filtered_df
 
