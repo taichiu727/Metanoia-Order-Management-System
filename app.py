@@ -526,15 +526,12 @@ def initialize_session_state():
         unsafe_allow_html=True
     )
     if "authentication_state" not in st.session_state:
-        st.session_state.authentication_state = "initial"
-        # Check for existing valid token
         db = OrderDatabase()
-        token = db.load_token()
+        token = check_token_validity(db)  # Use the existing token validation logic
         if token:
-            current_time = int(time.time())
-            token_age = current_time - token["fetch_time"]
-            if token_age < (token["expire_in"] - 300):  # Token is still valid
-                st.session_state.authentication_state = "complete"
+            st.session_state.authentication_state = "complete"
+        else:
+            st.session_state.authentication_state = "initial"
     
     # Initialize all required session state variables
     if "orders" not in st.session_state:
