@@ -850,10 +850,6 @@ def orders_table(filtered_df):
 
     orders = filtered_df.groupby('Order Number')
     
-    # Initialize global changes list if not exists
-    if 'global_changes' not in st.session_state:
-        st.session_state.global_changes = []
-    
     for order_num, order_data in orders:
         all_received = all(order_data['Received'])
         status_emoji = "✅" if all_received else "⚠️" if any(order_data['Received']) else "❌"
@@ -874,25 +870,14 @@ def orders_table(filtered_df):
                 "Note": st.column_config.TextColumn("Note", width="medium", default="")
             }
             
-            # Create a unique key for each row based on order number and product
-            def create_row_key(row):
-                return f"{row['Order Number']}_{row['Product']}"
-            
-            # Initialize current state if not exists
-            current_state_key = f"order_state_{order_num}"
-            if current_state_key not in st.session_state:
-                st.session_state[current_state_key] = {
-                    create_row_key(row): {
-                        'received': row['Received'],
-                        'missing': row['Missing'],
-                        'note': row['Note']
-                    } for _, row in order_data.iterrows()
-                }
+            product_df = order_data[["Order Number", "Created", "Deadline", "Product", 
+                                   "Item Spec", "Item Number", "Quantity", "Image", 
+                                   "Received", "Missing", "Note", "Tag"]]
             
             editor_key = f"order_{order_num}"
             
             edited_df = st.data_editor(
-                order_data,
+                product_df,
                 column_config=column_config,
                 use_container_width=True,
                 key=editor_key,
@@ -901,79 +886,38 @@ def orders_table(filtered_df):
                          "Item Spec", "Item Number", "Quantity", "Image", "Tag"]
             )
             
-            # Process changes
+            # Handle changes for this order
             if editor_key in st.session_state and "edited_rows" in st.session_state[editor_key]:
                 edited_rows = st.session_state[editor_key]["edited_rows"]
+                
                 if edited_rows:
-                    changes = []
-                    current_state = st.session_state[current_state_key]
-                    
-                    for idx_str, row_changes in edited_rows.items():
+                    for idx_str, changes in edited_rows.items():
                         idx = int(idx_str)
                         row = edited_df.iloc[idx]
-                        row_key = create_row_key(row)
                         
-                        # Get current state for this row
-                        row_state = current_state.get(row_key, {
-                            'received': row['Received'],
-                            'missing': row['Missing'],
-                            'note': row['Note']
-                        })
+                        # Get the updated values
+                        received = changes.get("Received", row["Received"])
+                        missing = changes.get("Missing", row["Missing"])
+                        note = changes.get("Note", row["Note"])
                         
-                        # Update only changed fields
-                        received = row_changes.get('Received', row_state['received'])
-                        missing = row_changes.get('Missing', row_state['missing'])
-                        note = row_changes.get('Note', row_state['note'])
+                        # Update database
+                        db.upsert_order_tracking(
+                            order_sn=str(row["Order Number"]),
+                            product_name=str(row["Product"]),
+                            received=bool(received),
+                            missing_count=int(missing) if pd.notna(missing) else 0,
+                            note=str(note) if pd.notna(note) else ""
+                        )
                         
-                        # Only add to changes if something actually changed
-                        if (received != row_state['received'] or 
-                            missing != row_state['missing'] or 
-                            note != row_state['note']):
-                            
-                            changes.append({
-                                'order_sn': str(row["Order Number"]),
-                                'product_name': str(row["Product"]),
-                                'received': received,
-                                'missing_count': int(missing) if pd.notna(missing) else 0,
-                                'note': str(note) if pd.notna(note) else "",
-                                'mask': (filtered_df['Order Number'] == row['Order Number']) & 
-                                       (filtered_df['Product'] == row['Product'])
-                            })
-                            
-                            # Update current state
-                            current_state[row_key] = {
-                                'received': received,
-                                'missing': missing,
-                                'note': note
-                            }
+                        # Update DataFrame
+                        mask = (filtered_df['Order Number'] == row['Order Number']) & \
+                              (filtered_df['Product'] == row['Product'])
+                        filtered_df.loc[mask, 'Received'] = received
+                        filtered_df.loc[mask, 'Missing'] = missing
+                        filtered_df.loc[mask, 'Note'] = note
                     
-                    # Process changes if any
-                    if changes:
-                        try:
-                            # Prepare batch records
-                            batch_records = [
-                                (change['order_sn'], change['product_name'], 
-                                 change['received'], change['missing_count'], 
-                                 change['note'])
-                                for change in changes
-                            ]
-                            
-                            # Update database
-                            db.batch_upsert_order_tracking(batch_records)
-                            
-                            # Update DataFrame
-                            for change in changes:
-                                mask = change['mask']
-                                filtered_df.loc[mask, 'Received'] = change['received']
-                                filtered_df.loc[mask, 'Missing'] = change['missing_count']
-                                filtered_df.loc[mask, 'Note'] = change['note']
-                            
-                            st.toast("✅ Changes saved!")
-                            
-                        except Exception as e:
-                            st.error(f"Error saving changes: {str(e)}")
-                    
-                    # Clear edited rows after processing
+                    st.toast("✅ Changes saved!")
+                    # Clear edited rows after saving
                     st.session_state[editor_key]["edited_rows"] = {}
 
     return filtered_df
