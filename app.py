@@ -853,7 +853,7 @@ def get_column_config():
         "Item Number": st.column_config.TextColumn("Item Number", width="small"),
         "Quantity": st.column_config.NumberColumn("Quantity", width="small"),
         "Image": st.column_config.ImageColumn("Image", width="small"),
-        "Tag": st.column_config.TextColumn("Tag", width="small"),
+        "Tag": st.column_config.TextColumn("Tag", width="small", required=False),
         "Received": st.column_config.CheckboxColumn("Received", width="small", default=False),
         "Missing": st.column_config.NumberColumn("Missing", width="small", default=0),
         "Note": st.column_config.TextColumn("Note", width="medium", default="")
@@ -878,45 +878,74 @@ def order_editor(order_data, order_num, filtered_df, db):
             key=editor_key,
             num_rows="fixed",
             disabled=["Order Number", "Created", "Deadline", "Product", 
-                     "Item Spec", "Item Number", "Quantity", "Image", "Tag"]
+                     "Item Spec", "Item Number", "Quantity", "Image"]
         )
         
         if editor_key in st.session_state and "edited_rows" in st.session_state[editor_key]:
             edited_rows = st.session_state[editor_key]["edited_rows"]
             if edited_rows:
                 batch_records = []
+                tag_updates = []
+                
                 for idx_str, changes in edited_rows.items():
                     idx = int(idx_str)
                     row = edited_df.iloc[idx]
                     
-                    received = changes.get("Received", row["Received"])
-                    missing = changes.get("Missing", row["Missing"])
-                    note = changes.get("Note", row["Note"])
-                    
-                    batch_records.append((
-                        str(row["Order Number"]),
-                        str(row["Product"]),
-                        str(row["Item Spec"]),
-                        bool(received),
-                        int(missing) if pd.notna(missing) else 0,
-                        str(note) if pd.notna(note) else ""
-                    ))
-                    
-                    mask = (filtered_df['Order Number'] == row['Order Number']) & \
-                           (filtered_df['Product'] == row['Product']) & \
-                           (filtered_df['Item Spec'] == row['Item Spec'])
-                    filtered_df.loc[mask, 'Received'] = received
-                    filtered_df.loc[mask, 'Missing'] = missing
-                    filtered_df.loc[mask, 'Note'] = note
-                
-                if batch_records:
-                    try:
-                        db.batch_upsert_order_tracking(batch_records)
-                        st.toast("✅ Changes saved!")
-                    except Exception as e:
-                        st.error(f"Error saving changes: {str(e)}")
+                    # Handle tag changes
+                    if "Tag" in changes:
+                        new_tag = changes["Tag"]
+                        sku = row["Item Number"]
+                        tag_updates.append((sku, new_tag))
                         
-                st.session_state[editor_key]["edited_rows"] = {}
+                        # Update the tag in filtered_df for all rows with same SKU
+                        sku_mask = filtered_df['Item Number'] == sku
+                        filtered_df.loc[sku_mask, 'Tag'] = new_tag
+                        
+                        # Update session state product tags
+                        st.session_state.product_tags[sku] = new_tag
+                    
+                    # Handle other changes (Received, Missing, Note)
+                    if any(field in changes for field in ["Received", "Missing", "Note"]):
+                        received = changes.get("Received", row["Received"])
+                        missing = changes.get("Missing", row["Missing"])
+                        note = changes.get("Note", row["Note"])
+                        
+                        batch_records.append((
+                            str(row["Order Number"]),
+                            str(row["Product"]),
+                            str(row["Item Spec"]),
+                            bool(received),
+                            int(missing) if pd.notna(missing) else 0,
+                            str(note) if pd.notna(note) else ""
+                        ))
+                        
+                        mask = (filtered_df['Order Number'] == row['Order Number']) & \
+                               (filtered_df['Product'] == row['Product']) & \
+                               (filtered_df['Item Spec'] == row['Item Spec'])
+                        filtered_df.loc[mask, 'Received'] = received
+                        filtered_df.loc[mask, 'Missing'] = missing
+                        filtered_df.loc[mask, 'Note'] = note
+                
+                # Save changes to databases
+                success = True
+                try:
+                    # Update product tags
+                    for sku, tag in tag_updates:
+                        db.upsert_product_tag(sku, tag)
+                    
+                    # Update order tracking
+                    if batch_records:
+                        db.batch_upsert_order_tracking(batch_records)
+                    
+                    if tag_updates or batch_records:
+                        st.toast("✅ Changes saved!")
+                        
+                except Exception as e:
+                    success = False
+                    st.error(f"Error saving changes: {str(e)}")
+                
+                if success:
+                    st.session_state[editor_key]["edited_rows"] = {}
 
 @st.fragment
 def orders_table(filtered_df):
