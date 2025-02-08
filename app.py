@@ -855,7 +855,15 @@ def orders_table(filtered_df):
         status_emoji = "✅" if all_received else "⚠️" if any(order_data['Received']) else "❌"
         
         with st.expander(f"Order: {order_num} {status_emoji}", expanded=True):
+            # Create unique row ID combining order number, product name, and model name
+            product_df = order_data.copy()
+            product_df['row_id'] = product_df.apply(
+                lambda row: f"{row['Order Number']}___{row['Product']}___{row['Item Spec']}", 
+                axis=1
+            )
+            
             column_config = {
+                "row_id": None,  # Hide this column
                 "Order Number": st.column_config.TextColumn("Order Number", width="small"),
                 "Created": st.column_config.TextColumn("Created", width="small"),
                 "Deadline": st.column_config.TextColumn("Deadline", width="small"),
@@ -870,11 +878,10 @@ def orders_table(filtered_df):
                 "Note": st.column_config.TextColumn("Note", width="medium", default="")
             }
             
-            product_df = order_data[["Order Number", "Created", "Deadline", "Product", 
-                                   "Item Spec", "Item Number", "Quantity", "Image", 
-                                   "Received", "Missing", "Note", "Tag"]]
-            
             editor_key = f"order_{order_num}"
+            
+            # Set the index to row_id to ensure unique identification
+            product_df.set_index('row_id', inplace=True)
             
             edited_df = st.data_editor(
                 product_df,
@@ -891,30 +898,34 @@ def orders_table(filtered_df):
                 edited_rows = st.session_state[editor_key]["edited_rows"]
                 
                 if edited_rows:
-                    for idx_str, changes in edited_rows.items():
-                        idx = int(idx_str)
-                        row = edited_df.iloc[idx]
+                    for row_id, changes in edited_rows.items():
+                        # Split the row_id into its components using the separator
+                        order_sn, product_name, model_name = row_id.split("___")
+                        row = edited_df.loc[row_id]
                         
-                        # Get the updated values
-                        received = changes.get("Received", row["Received"])
-                        missing = changes.get("Missing", row["Missing"])
-                        note = changes.get("Note", row["Note"])
-                        
-                        # Update database
-                        db.upsert_order_tracking(
-                            order_sn=str(row["Order Number"]),
-                            product_name=str(row["Product"]),
-                            received=bool(received),
-                            missing_count=int(missing) if pd.notna(missing) else 0,
-                            note=str(note) if pd.notna(note) else ""
-                        )
-                        
-                        # Update DataFrame
-                        mask = (filtered_df['Order Number'] == row['Order Number']) & \
-                              (filtered_df['Product'] == row['Product'])
-                        filtered_df.loc[mask, 'Received'] = received
-                        filtered_df.loc[mask, 'Missing'] = missing
-                        filtered_df.loc[mask, 'Note'] = note
+                        # Only process if there are actual changes
+                        if any(field in changes for field in ["Received", "Missing", "Note"]):
+                            # Get the updated values
+                            received = changes.get("Received", row["Received"])
+                            missing = changes.get("Missing", row["Missing"])
+                            note = changes.get("Note", row["Note"])
+                            
+                            # Update database
+                            db.upsert_order_tracking(
+                                order_sn=order_sn,
+                                product_name=product_name,
+                                received=bool(received),
+                                missing_count=int(missing) if pd.notna(missing) else 0,
+                                note=str(note) if pd.notna(note) else ""
+                            )
+                            
+                            # Update DataFrame with exact matching including Item Spec
+                            mask = (filtered_df['Order Number'] == order_sn) & \
+                                  (filtered_df['Product'] == product_name) & \
+                                  (filtered_df['Item Spec'] == model_name)
+                            filtered_df.loc[mask, 'Received'] = received
+                            filtered_df.loc[mask, 'Missing'] = missing
+                            filtered_df.loc[mask, 'Note'] = note
                     
                     st.toast("✅ Changes saved!")
                     # Clear edited rows after saving
