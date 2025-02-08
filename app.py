@@ -845,17 +845,26 @@ def orders_table(filtered_df):
         return filtered_df
 
     db = OrderDatabase()
-    product_tags = db.get_product_tags()
-    filtered_df['Tag'] = filtered_df['Item Number'].map(lambda x: product_tags.get(x, ''))
+    
+    # Only fetch product tags if not already in session state
+    if 'product_tags' not in st.session_state:
+        st.session_state.product_tags = db.get_product_tags()
+    
+    filtered_df['Tag'] = filtered_df['Item Number'].map(lambda x: st.session_state.product_tags.get(x, ''))
 
     orders = filtered_df.groupby('Order Number')
-    
-    # Store all changes to be processed in batch
     all_changes = []
     
     for order_num, order_data in orders:
-        all_received = all(order_data['Received'])
-        status_emoji = "✅" if all_received else "⚠️" if any(order_data['Received']) else "❌"
+        # Store current values in session state if not exists
+        key = f"order_state_{order_num}"
+        if key not in st.session_state:
+            st.session_state[key] = {
+                'all_received': all(order_data['Received']),
+                'any_received': any(order_data['Received'])
+            }
+        
+        status_emoji = "✅" if st.session_state[key]['all_received'] else "⚠️" if st.session_state[key]['any_received'] else "❌"
         
         with st.expander(f"Order: {order_num} {status_emoji}", expanded=True):
             column_config = {
@@ -879,6 +888,13 @@ def orders_table(filtered_df):
             
             editor_key = f"order_{order_num}"
             
+            # Initialize editor state if not exists
+            if f"{editor_key}_state" not in st.session_state:
+                st.session_state[f"{editor_key}_state"] = {
+                    'last_edit': None,
+                    'pending_changes': []
+                }
+            
             edited_df = st.data_editor(
                 product_df,
                 column_config=column_config,
@@ -889,23 +905,25 @@ def orders_table(filtered_df):
                          "Item Spec", "Item Number", "Quantity", "Image", "Tag"]
             )
             
-            # Check for changes in this order's data editor
+            # Handle changes without triggering rerun
             if editor_key in st.session_state and "edited_rows" in st.session_state[editor_key]:
                 edited_rows = st.session_state[editor_key]["edited_rows"]
-                if edited_rows:
+                editor_state = st.session_state[f"{editor_key}_state"]
+                
+                # Only process if we have new changes
+                if edited_rows and edited_rows != editor_state['last_edit']:
+                    editor_state['last_edit'] = edited_rows.copy()
+                    
                     for idx_str, changes in edited_rows.items():
                         idx = int(idx_str)
                         row = edited_df.iloc[idx]
                         
-                        # Only process if there are actual changes
                         if any(field in changes for field in ["Received", "Missing", "Note"]):
-                            # Get the values, using original if not changed
                             received = changes.get("Received", row["Received"])
                             missing = changes.get("Missing", row["Missing"])
                             note = changes.get("Note", row["Note"])
                             
-                            # Add to batch changes
-                            all_changes.append({
+                            change_data = {
                                 'order_sn': str(row["Order Number"]),
                                 'product_name': str(row["Product"]),
                                 'received': bool(received),
@@ -913,29 +931,38 @@ def orders_table(filtered_df):
                                 'note': str(note) if pd.notna(note) else "",
                                 'mask': (filtered_df['Order Number'] == row['Order Number']) & 
                                        (filtered_df['Product'] == row['Product'])
-                            })
+                            }
+                            
+                            all_changes.append(change_data)
+                            editor_state['pending_changes'].append(change_data)
     
-    # Process all changes in batch if there are any
+    # Process all changes in batch
     if all_changes:
         try:
-            # Prepare records for batch update
             batch_records = [
                 (change['order_sn'], change['product_name'], change['received'], 
                  change['missing_count'], change['note'])
                 for change in all_changes
             ]
             
-            # Batch update database
             db.batch_upsert_order_tracking(batch_records)
             
-            # Update DataFrame
+            # Update DataFrame without triggering rerun
             for change in all_changes:
                 mask = change['mask']
                 filtered_df.loc[mask, 'Received'] = change['received']
                 filtered_df.loc[mask, 'Missing'] = change['missing_count']
                 filtered_df.loc[mask, 'Note'] = change['note']
             
-            st.toast("✅ All changes saved successfully!")
+            # Update order states
+            for order_num in orders.groups.keys():
+                order_data = filtered_df[filtered_df['Order Number'] == order_num]
+                st.session_state[f"order_state_{order_num}"].update({
+                    'all_received': all(order_data['Received']),
+                    'any_received': any(order_data['Received'])
+                })
+            
+            st.toast("✅ Changes saved!", icon="✅")
             
         except Exception as e:
             st.error(f"Error saving changes: {str(e)}")
