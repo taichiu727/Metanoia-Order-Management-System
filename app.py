@@ -849,6 +849,7 @@ def orders_table(filtered_df):
     filtered_df['Tag'] = filtered_df['Item Number'].map(lambda x: product_tags.get(x, ''))
 
     orders = filtered_df.groupby('Order Number')
+    all_edited_data = []
     
     for order_num, order_data in orders:
         all_received = all(order_data['Received'])
@@ -873,52 +874,27 @@ def orders_table(filtered_df):
             product_df = order_data[["Order Number", "Created", "Deadline", "Product", 
                                    "Item Spec", "Item Number", "Quantity", "Image", 
                                    "Received", "Missing", "Note", "Tag"]]
-            
-            editor_key = f"order_{order_num}"
-            
             edited_df = st.data_editor(
                 product_df,
                 column_config=column_config,
                 use_container_width=True,
-                key=editor_key,
+                key=f"order_{order_num}",
                 num_rows="fixed",
                 disabled=["Order Number", "Created", "Deadline", "Product", 
                          "Item Spec", "Item Number", "Quantity", "Image", "Tag"]
             )
             
-            # Handle changes for this order
-            if editor_key in st.session_state and "edited_rows" in st.session_state[editor_key]:
-                edited_rows = st.session_state[editor_key]["edited_rows"]
-                
-                if edited_rows:
-                    for idx_str, changes in edited_rows.items():
-                        idx = int(idx_str)
-                        row = edited_df.iloc[idx]
-                        
-                        # Get the updated values
-                        received = changes.get("Received", row["Received"])
-                        missing = changes.get("Missing", row["Missing"])
-                        note = changes.get("Note", row["Note"])
-                        
-                        # Update database
-                        db.upsert_order_tracking(
-                            order_sn=str(row["Order Number"]),
-                            product_name=str(row["Product"]),
-                            received=bool(received),
-                            missing_count=int(missing) if pd.notna(missing) else 0,
-                            note=str(note) if pd.notna(note) else ""
-                        )
-                        
-                        # Update DataFrame
-                        mask = (filtered_df['Order Number'] == row['Order Number']) & \
-                              (filtered_df['Product'] == row['Product'])
-                        filtered_df.loc[mask, 'Received'] = received
-                        filtered_df.loc[mask, 'Missing'] = missing
-                        filtered_df.loc[mask, 'Note'] = note
-                    
-                    st.toast("✅ Changes saved!")
-                    # Clear edited rows after saving
-                    st.session_state[editor_key]["edited_rows"] = {}
+            if edited_df is not None:
+                all_edited_data.append(edited_df)
+
+    if all_edited_data:
+        combined_edits = pd.concat(all_edited_data)
+        filtered_df = filtered_df.copy()
+        for idx, row in combined_edits.iterrows():
+            mask = (filtered_df['Order Number'] == row['Order Number']) & (filtered_df['Product'] == row['Product'])
+            filtered_df.loc[mask, 'Received'] = row['Received'] if pd.notna(row['Received']) else False
+            filtered_df.loc[mask, 'Missing'] = row['Missing'] if pd.notna(row['Missing']) else 0
+            filtered_df.loc[mask, 'Note'] = row['Note'] if pd.notna(row['Note']) else ""
 
     return filtered_df
 
