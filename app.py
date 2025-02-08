@@ -114,6 +114,15 @@ class OrderDatabase:
     def save_token(self, token_data):
         try:
             self.connect()
+            # Ensure refresh token data is properly set
+            token_data = token_data.copy()  # Create a copy to avoid modifying the original
+            if "refresh_token_expire_in" not in token_data:
+                token_data["refresh_token_expire_in"] = 365 * 24 * 60 * 60  # 1 year in seconds
+            if "refresh_token_fetch_time" not in token_data:
+                token_data["refresh_token_fetch_time"] = int(time.time())
+            if "fetch_time" not in token_data:
+                token_data["fetch_time"] = int(time.time())
+                
             self.cursor.execute("""
                 INSERT INTO shopee_token (
                     access_token, refresh_token, expire_in, fetch_time,
@@ -136,11 +145,11 @@ class OrderDatabase:
                 token_data["access_token"],
                 token_data["refresh_token"],
                 token_data["expire_in"],
-                token_data.get("fetch_time", int(time.time())),
+                token_data["fetch_time"],
                 token_data.get("shop_id", SHOP_ID),
                 token_data.get("merchant_id"),
-                token_data.get("refresh_token_expire_in", 365 * 24 * 60 * 60),  # Default 1 year
-                token_data.get("refresh_token_fetch_time", int(time.time())),
+                token_data["refresh_token_expire_in"],
+                token_data["refresh_token_fetch_time"],
             ))
             self.conn.commit()
             return self.cursor.fetchone()["id"]
@@ -153,7 +162,8 @@ class OrderDatabase:
             self.cursor.execute("""
                 SELECT 
                     access_token, refresh_token, expire_in, fetch_time,
-                    shop_id, merchant_id
+                    shop_id, merchant_id, refresh_token_expire_in,
+                    refresh_token_fetch_time
                 FROM shopee_token
                 ORDER BY updated_at DESC
                 LIMIT 1
