@@ -958,7 +958,7 @@ def export_controls(df):
             st.success("Data copied to clipboard!")
 
 @st.fragment
-def auth_fragment():
+def auth_fragment(db):  # Add db as a parameter
     """Fragment for handling authentication"""
     if st.session_state.authentication_state != "complete":
         st.info("Please authenticate with your Shopee account to continue.")
@@ -1338,7 +1338,7 @@ def main():
     st.title("📦 Order Management")
     
     # Handle authentication using fragment
-    if not auth_fragment():
+    if not auth_fragment(db):
         return
 
     # Check token validity
