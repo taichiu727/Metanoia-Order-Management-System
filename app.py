@@ -806,20 +806,97 @@ def update_orders_df(original_df, edited_df):
     # Reorder columns to match original order
     return updated_df[column_order]
 
-def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
-    """Ship an order using Shopee API"""
+def get_shipping_parameter(access_token, client_id, client_secret, shop_id, order_sn):
+    """Get shipping parameters from Shopee API"""
     timestamp = int(time.time())
     
-    # Request body for shipping
+    # URL parameters
+    params = {
+        'partner_id': client_id,
+        'timestamp': timestamp,
+        'access_token': access_token,
+        'shop_id': shop_id,
+        'order_sn': order_sn
+    }
+
+    path = "/api/v2/logistics/get_shipping_parameter"
+    sign = generate_api_signature(
+        api_type='shop',
+        partner_id=client_id,
+        path=path,
+        timestamp=timestamp,
+        access_token=access_token,
+        shop_id=shop_id,
+        client_secret=client_secret
+    )
+
+    params['sign'] = sign
+    url = f"https://partner.shopeemobile.com{path}"
+    
+    try:
+        response = requests.get(url, params=params)
+        response_data = response.json()
+        
+        if response.status_code == 200:
+            if "error" not in response_data or response_data.get("error", "") == "":
+                return response_data
+            else:
+                error_msg = response_data.get("message", "Unknown error")
+                error_code = response_data.get("error", "")
+                st.error(f"Shopee API Error: {error_msg} (Code: {error_code})")
+                return None
+        else:
+            st.error(f"HTTP Error {response.status_code}: {response.text}")
+            return None
+    except Exception as e:
+        st.error(f"Error getting shipping parameters: {str(e)}")
+        return None
+
+def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
+    """Ship an order using Shopee API"""
+    # First get shipping parameters
+    shipping_params = get_shipping_parameter(
+        access_token=access_token,
+        client_id=client_id,
+        client_secret=client_secret,
+        shop_id=shop_id,
+        order_sn=order_sn
+    )
+    
+    if not shipping_params or "response" not in shipping_params:
+        st.error("Failed to get shipping parameters")
+        return None
+        
+    # Initialize shipping request body based on info_needed
+    info_needed = shipping_params["response"].get("info_needed", [])
     body = {
-        'order_sn': order_sn,
-        'pickup': {
-            'address_id': 0,  # Use default address
-            'pickup_time_id': 0  # Use default pickup time
-        }
+        "order_sn": order_sn,
+        "package_number": ""
     }
     
-    # URL parameters
+    # Add pickup info if needed
+    if "pickup" in info_needed:
+        pickup_info = shipping_params["response"].get("pickup", {})
+        address_list = pickup_info.get("address_list", [])
+        time_slot_list = pickup_info.get("time_slot_list", [])
+        
+        if address_list:
+            body["pickup"] = {
+                "address_id": address_list[0].get("address_id", 0)  # Use first available address
+            }
+            if time_slot_list:
+                body["pickup"]["pickup_time_id"] = time_slot_list[0].get("id", "")  # Use first available time slot
+    
+    # Add dropoff info if needed
+    if "dropoff" in info_needed:
+        body["dropoff"] = {}
+        
+    # Add non-integrated info if needed
+    if "non-integrated" in info_needed:
+        body["non_integrated"] = {}
+
+    # Make the shipping request
+    timestamp = int(time.time())
     params = {
         'partner_id': client_id,
         'timestamp': timestamp,
@@ -842,15 +919,11 @@ def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
     url = f"https://partner.shopeemobile.com{path}"
     
     try:
-        # Send POST request with both params and body
         response = requests.post(url, params=params, json=body)
         response_data = response.json()
         
-        # Log full response for debugging
-        print(f"Ship order response: {response_data}")
-        
         if response.status_code == 200:
-            if response_data.get("error", "") == "":
+            if "error" not in response_data or response_data.get("error", "") == "":
                 return response_data
             else:
                 error_msg = response_data.get("message", "Unknown error")
@@ -860,23 +933,23 @@ def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
         else:
             st.error(f"HTTP Error {response.status_code}: {response.text}")
             return None
-    except requests.exceptions.RequestException as e:
-        st.error(f"Network error shipping order: {str(e)}")
-        return None
     except Exception as e:
-        st.error(f"Unexpected error shipping order: {str(e)}")
+        st.error(f"Error shipping order: {str(e)}")
         return None
 
 def create_shipping_document(access_token, client_id, client_secret, shop_id, order_sn):
     """Create shipping document using Shopee API"""
     timestamp = int(time.time())
     
+    body = {
+        'order_list': [{'order_sn': order_sn}]
+    }
+    
     params = {
         'partner_id': client_id,
         'timestamp': timestamp,
         'access_token': access_token,
-        'shop_id': shop_id,
-        'order_list': [{'order_sn': order_sn}]
+        'shop_id': shop_id
     }
 
     path = "/api/v2/logistics/create_shipping_document"
@@ -894,9 +967,17 @@ def create_shipping_document(access_token, client_id, client_secret, shop_id, or
     url = f"https://partner.shopeemobile.com{path}"
     
     try:
-        response = requests.post(url, json=params)
+        response = requests.post(url, params=params, json=body)
+        response_data = response.json()
+        
         if response.status_code == 200:
-            return response.json()
+            if "error" not in response_data or response_data.get("error", "") == "":
+                return response_data
+            else:
+                error_msg = response_data.get("message", "Unknown error")
+                error_code = response_data.get("error", "")
+                st.error(f"Shopee API Error: {error_msg} (Code: {error_code})")
+                return None
         else:
             st.error(f"Error creating shipping document: {response.text}")
             return None
@@ -908,12 +989,15 @@ def download_shipping_document(access_token, client_id, client_secret, shop_id, 
     """Download shipping document using Shopee API"""
     timestamp = int(time.time())
     
+    body = {
+        'order_list': [{'order_sn': order_sn}]
+    }
+    
     params = {
         'partner_id': client_id,
         'timestamp': timestamp,
         'access_token': access_token,
-        'shop_id': shop_id,
-        'order_list': [{'order_sn': order_sn}]
+        'shop_id': shop_id
     }
 
     path = "/api/v2/logistics/download_shipping_document"
@@ -931,9 +1015,17 @@ def download_shipping_document(access_token, client_id, client_secret, shop_id, 
     url = f"https://partner.shopeemobile.com{path}"
     
     try:
-        response = requests.post(url, json=params)
+        response = requests.post(url, params=params, json=body)
+        response_data = response.json()
+        
         if response.status_code == 200:
-            return response.json()
+            if "error" not in response_data or response_data.get("error", "") == "":
+                return response_data
+            else:
+                error_msg = response_data.get("message", "Unknown error")
+                error_code = response_data.get("error", "")
+                st.error(f"Shopee API Error: {error_msg} (Code: {error_code})")
+                return None
         else:
             st.error(f"Error downloading shipping document: {response.text}")
             return None
