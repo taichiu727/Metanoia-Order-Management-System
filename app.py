@@ -1262,13 +1262,16 @@ def order_editor(order_data, order_num, filtered_df, db):
                         if download_response and "response" in download_response:
                             if "html_content" in download_response["response"]:
                                 html_content = download_response["response"]["html_content"]
-                                # Add auto-submit script
+                                # Add auto-submit script with target="_blank"
+                                html_content = html_content.replace(
+                                    '<form method="post"',
+                                    '<form method="post" target="_blank"'
+                                )
                                 html_content = html_content.replace(
                                     '</form>',
-                                    '</form><script>window.onload = function() { document.getElementById("form").submit(); };</script>'
+                                    '</form><script>document.getElementById("form").submit();</script>'
                                 )
-                                # Render in iframe
-                                st.components.v1.iframe(srcdoc=html_content, height=0, scrolling=True)
+                                st.components.v1.html(html_content, height=0)
                                 st.success("Shipping document should open automatically")
                             else:
                                 doc_url = download_response["response"].get("shipping_document_url")
