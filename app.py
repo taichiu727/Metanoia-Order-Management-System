@@ -1020,6 +1020,7 @@ def order_editor(order_data, order_num, filtered_df, db):
                     
                     if shipping_response and "error" not in shipping_response:
                         st.info("Step 2/3: Creating shipping document...")
+                        # Create shipping document
                         doc_response = create_shipping_document(
                             access_token=token["access_token"],
                             client_id=CLIENT_ID,
@@ -1029,6 +1030,7 @@ def order_editor(order_data, order_num, filtered_df, db):
                         )
                         
                         if doc_response and doc_response.get("response", {}).get("success"):
+                            st.info("Step 3/3: Downloading shipping document...")
                             # Download shipping document
                             download_response = download_shipping_document(
                                 access_token=token["access_token"],
@@ -1056,9 +1058,9 @@ def order_editor(order_data, order_num, filtered_df, db):
                         else:
                             st.error("Failed to create shipping document")
                     else:
-                        st.error("Failed to ship order")
-                else:
-                    st.error("Invalid token. Please re-authenticate.")
+                        error_msg = shipping_response.get("message", "Unknown error") if shipping_response else "No response"
+                        error_code = shipping_response.get("error", "") if shipping_response else "Unknown error"
+                        st.error(f"Failed to ship order: {error_msg} (Error code: {error_code})")
 
         editor_key = f"order_{order_num}"
         
