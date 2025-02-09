@@ -978,9 +978,12 @@ def create_shipping_document(access_token, client_id, client_secret, shop_id, or
     timestamp = int(time.time())
     
     # Request body
+    # Request body
     body = {
-        'order_sn': order_sn,  # Changed from order_list to single order_sn
-        'shop_id': shop_id,    # Added shop_id to body
+        'order_list': [{
+            'order_sn': order_sn
+        }],
+        'shop_id': shop_id
     }
     
     params = {
