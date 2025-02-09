@@ -860,7 +860,6 @@ def get_shipping_parameter(access_token, client_id, client_secret, shop_id, orde
 
 def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
     """Ship an order using Shopee API"""
-   
     timestamp = int(time.time())
     
     # Get shipping parameters
@@ -917,49 +916,8 @@ def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
         st.write("DEBUG - Shipping response:", response_data)
         
         if response.status_code == 200:
-            # Success if error is empty or not present
             if "error" not in response_data or response_data.get("error") == "":
                 st.success("Order shipped successfully!")
-                
-                # Create shipping document
-                st.info("Creating shipping document...")
-                doc_response = create_shipping_document(
-                    access_token=access_token,
-                    client_id=client_id,
-                    client_secret=client_secret,
-                    shop_id=shop_id,
-                    order_sn=order_sn
-                )
-                
-                if doc_response and ("error" not in doc_response or doc_response.get("error") == ""):
-                    # Download shipping document
-                    st.info("Downloading shipping document...")
-                    download_response = download_shipping_document(
-                        access_token=access_token,
-                        client_id=client_id,
-                        client_secret=client_secret,
-                        shop_id=shop_id,
-                        order_sn=order_sn
-                    )
-                    
-                    if download_response and "response" in download_response:
-                        doc_url = download_response["response"].get("shipping_document_url")
-                        if doc_url:
-                            # Open shipping document in new tab
-                            js = f"""
-                            <script>
-                            window.open('{doc_url}', '_blank');
-                            </script>
-                            """
-                            st.components.v1.html(js)
-                            st.success("Shipping document opened in new tab!")
-                        else:
-                            st.error("No shipping document URL found")
-                    else:
-                        st.error("Failed to download shipping document")
-                else:
-                    st.error("Failed to create shipping document")
-                    
                 return response_data
             else:
                 error_msg = response_data.get("message", "Unknown error")
