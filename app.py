@@ -1167,6 +1167,95 @@ def order_editor(order_data, order_num, filtered_df, db):
                         shop_id=SHOP_ID,
                         order_sn=order_num
                     )
+                    
+                    if shipping_response:
+                        # Get tracking number
+                        st.info("Step 2/3: Getting tracking number...")
+                        tracking_number = None
+                        max_attempts = 3
+                        for attempt in range(max_attempts):
+                            tracking_data = get_tracking_number(
+                                access_token=token["access_token"],
+                                client_id=CLIENT_ID,
+                                client_secret=CLIENT_SECRET,
+                                shop_id=SHOP_ID,
+                                order_sn=order_num
+                            )
+                            if tracking_data and tracking_data.get("response", {}).get("tracking_number"):
+                                tracking_number = tracking_data["response"]["tracking_number"]
+                                st.success(f"Got tracking number: {tracking_number}")
+                                break
+                            if attempt < max_attempts - 1:
+                                st.warning(f"Retrying... ({attempt + 1}/{max_attempts})")
+                                time.sleep(5)
+                        
+                        # Create shipping document with tracking number
+                        st.info("Step 3/3: Creating shipping document...")
+                        doc_request = {
+                            'order_list': [{
+                                'order_sn': order_num,
+                                'tracking_number': tracking_number
+                            }],
+                            'shop_id': SHOP_ID
+                        }
+                        
+                        doc_response = create_shipping_document(
+                            access_token=token["access_token"],
+                            client_id=CLIENT_ID,
+                            client_secret=CLIENT_SECRET,
+                            shop_id=SHOP_ID,
+                            order_sn=order_num,
+                            request_body=doc_request
+                        )
+                        
+                        if doc_response and ("error" not in doc_response or doc_response.get("error") == ""):
+                            download_response = download_shipping_document(
+                                access_token=token["access_token"],
+                                client_id=CLIENT_ID,
+                                client_secret=CLIENT_SECRET,
+                                shop_id=SHOP_ID,
+                                order_sn=order_num
+                            )
+                            
+                            if download_response and "response" in download_response:
+                                response_type = download_response["response"].get("type")
+                                
+                                if response_type == "html":
+                                    html_content = download_response["response"]["content"]
+                                    html_content = html_content.replace(
+                                        '<form method="post"',
+                                        '<form method="post" target="_blank"'
+                                    )
+                                    html_content = html_content.replace(
+                                        '</form>',
+                                        '</form><script>document.getElementById("form").submit();</script>'
+                                    )
+                                    st.components.v1.html(html_content, height=0)
+                                    st.success("Shipping document should open automatically")
+                                elif response_type == "pdf":
+                                    pdf_data = download_response["response"]["content"]
+                                    html_content = f"""
+                                    <html><body><script>
+                                        var pdfData = "{pdf_data}";
+                                        var byteCharacters = atob(pdfData);
+                                        var byteNumbers = new Array(byteCharacters.length);
+                                        for (var i = 0; i < byteCharacters.length; i++) {{
+                                            byteNumbers[i] = byteCharacters.charCodeAt(i);
+                                        }}
+                                        var byteArray = new Uint8Array(byteNumbers);
+                                        var file = new Blob([byteArray], {{ type: 'application/pdf' }});
+                                        var fileURL = URL.createObjectURL(file);
+                                        window.open(fileURL, '_blank');
+                                    </script></body></html>
+                                    """
+                                    st.components.v1.html(html_content, height=0)
+                                    st.success("PDF should open in new tab")
+                                else:
+                                    st.error("Unsupported document type")
+                            else:
+                                st.error("Failed to download shipping document")
+                        else:
+                            st.error("Failed to create shipping document")
                 else:
                     st.error("Invalid token. Please re-authenticate.")
 
