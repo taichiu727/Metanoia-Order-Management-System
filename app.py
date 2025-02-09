@@ -855,7 +855,6 @@ def get_shipping_parameter(access_token, client_id, client_secret, shop_id, orde
 
 def get_shipping_parameter(access_token, client_id, client_secret, shop_id, order_sn):
     """Get shipping parameters from Shopee API"""
-    import json
     timestamp = int(time.time())
     
     # URL parameters
@@ -881,15 +880,27 @@ def get_shipping_parameter(access_token, client_id, client_secret, shop_id, orde
     params['sign'] = sign
     url = f"https://partner.shopeemobile.com{path}"
     
+    st.write("DEBUG - API URL:", url)
+    st.write("DEBUG - API Params:", params)
+    
     try:
         response = requests.get(url, params=params)
-        response_data = response.json()
-        print("Shipping parameters response:", json.dumps(response_data, indent=2))
+        st.write("DEBUG - Response Status:", response.status_code)
+        st.write("DEBUG - Response Headers:", dict(response.headers))
         
-        if response.status_code == 200 and "error" not in response_data:
-            return response_data
+        response_data = response.json()
+        st.write("DEBUG - Full Response:", response_data)
+        
+        if response.status_code == 200:
+            if "error" not in response_data or not response_data.get("error"):
+                return response_data
+            else:
+                error_msg = response_data.get("message", "Unknown error")
+                error_code = response_data.get("error", "")
+                st.error(f"API Error: {error_msg} (Code: {error_code})")
+                return None
         else:
-            st.error(f"Error getting shipping parameters: {response_data.get('message', 'Unknown error')}")
+            st.error(f"HTTP Error {response.status_code}: {response.text}")
             return None
     except Exception as e:
         st.error(f"Error getting shipping parameters: {str(e)}")
