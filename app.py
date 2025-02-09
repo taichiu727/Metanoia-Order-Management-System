@@ -810,12 +810,21 @@ def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
     """Ship an order using Shopee API"""
     timestamp = int(time.time())
     
+    # Request body for shipping
+    body = {
+        'order_sn': order_sn,
+        'pickup': {
+            'address_id': 0,  # Use default address
+            'pickup_time_id': 0  # Use default pickup time
+        }
+    }
+    
+    # URL parameters
     params = {
         'partner_id': client_id,
         'timestamp': timestamp,
         'access_token': access_token,
-        'shop_id': shop_id,
-        'order_sn': order_sn
+        'shop_id': shop_id
     }
 
     path = "/api/v2/logistics/ship_order"
@@ -833,14 +842,29 @@ def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
     url = f"https://partner.shopeemobile.com{path}"
     
     try:
-        response = requests.post(url, params=params)
+        # Send POST request with both params and body
+        response = requests.post(url, params=params, json=body)
+        response_data = response.json()
+        
+        # Log full response for debugging
+        print(f"Ship order response: {response_data}")
+        
         if response.status_code == 200:
-            return response.json()
+            if response_data.get("error", "") == "":
+                return response_data
+            else:
+                error_msg = response_data.get("message", "Unknown error")
+                error_code = response_data.get("error", "")
+                st.error(f"Shopee API Error: {error_msg} (Code: {error_code})")
+                return None
         else:
-            st.error(f"Error shipping order: {response.text}")
+            st.error(f"HTTP Error {response.status_code}: {response.text}")
             return None
+    except requests.exceptions.RequestException as e:
+        st.error(f"Network error shipping order: {str(e)}")
+        return None
     except Exception as e:
-        st.error(f"Error shipping order: {str(e)}")
+        st.error(f"Unexpected error shipping order: {str(e)}")
         return None
 
 def create_shipping_document(access_token, client_id, client_secret, shop_id, order_sn):
@@ -976,10 +1000,16 @@ def order_editor(order_data, order_num, filtered_df, db):
         # Add shipping controls
         col1, col2 = st.columns([3, 1])
         with col2:
-            if st.button("出貨 🚚", key=f"ship_{order_num}"):
-                token = check_token_validity(db)
-                if token:
+            ship_button = st.button("出貨 🚚", key=f"ship_{order_num}")
+            if ship_button:
+                with st.spinner("Shipping order..."):
+                    token = check_token_validity(db)
+                    if not token:
+                        st.error("Authentication token is invalid. Please re-authenticate.")
+                        return
+                        
                     # Ship the order
+                    st.info("Step 1/3: Shipping order...")
                     shipping_response = ship_order(
                         access_token=token["access_token"],
                         client_id=CLIENT_ID,
@@ -988,8 +1018,8 @@ def order_editor(order_data, order_num, filtered_df, db):
                         order_sn=order_num
                     )
                     
-                    if shipping_response and shipping_response.get("response", {}).get("success"):
-                        # Create shipping document
+                    if shipping_response and "error" not in shipping_response:
+                        st.info("Step 2/3: Creating shipping document...")
                         doc_response = create_shipping_document(
                             access_token=token["access_token"],
                             client_id=CLIENT_ID,
