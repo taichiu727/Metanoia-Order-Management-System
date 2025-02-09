@@ -1070,7 +1070,6 @@ def get_tracking_number(access_token, client_id, client_secret, shop_id, order_s
         return None
 
 def download_shipping_document(access_token, client_id, client_secret, shop_id, order_sn):
-    """Download shipping document using Shopee API"""
     timestamp = int(time.time())
     
     body = {
@@ -1111,20 +1110,28 @@ def download_shipping_document(access_token, client_id, client_secret, shop_id, 
             st.error(f"HTTP Error {response.status_code}: {response.text}")
             return None
             
-        content_type = response.headers.get('content-type', '')
+        content_type = response.headers.get('content-type', '').lower()
+        
         if 'text/html' in content_type:
-            # Direct HTML response containing the form
             return {
                 "response": {
-                    "shipping_document_url": response.url,
-                    "html_content": response.text
+                    "type": "html",
+                    "content": response.text
                 }
             }
-            
-        try:
+        elif 'application/pdf' in content_type:
+            import base64
+            pdf_data = base64.b64encode(response.content).decode('utf-8')
+            return {
+                "response": {
+                    "type": "pdf",
+                    "content": pdf_data
+                }
+            }
+        elif 'application/json' in content_type:
             return response.json()
-        except ValueError:
-            st.error(f"Invalid response format: {response.text[:200]}...")
+        else:
+            st.error(f"Unsupported content type: {content_type}")
             return None
             
     except Exception as e:
@@ -1260,9 +1267,10 @@ def order_editor(order_data, order_num, filtered_df, db):
                         )
                         
                         if download_response and "response" in download_response:
-                            if "html_content" in download_response["response"]:
-                                html_content = download_response["response"]["html_content"]
-                                # Add auto-submit script with target="_blank"
+                            response_type = download_response["response"].get("type")
+                            
+                            if response_type == "html":
+                                html_content = download_response["response"]["content"]
                                 html_content = html_content.replace(
                                     '<form method="post"',
                                     '<form method="post" target="_blank"'
@@ -1273,6 +1281,15 @@ def order_editor(order_data, order_num, filtered_df, db):
                                 )
                                 st.components.v1.html(html_content, height=0)
                                 st.success("Shipping document should open automatically")
+                            elif response_type == "pdf":
+                                pdf_data = download_response["response"]["content"]
+                                st.download_button(
+                                    "Download PDF",
+                                    pdf_data,
+                                    file_name=f"shipping_label_{order_num}.pdf",
+                                    mime="application/pdf"
+                                )
+                                st.success("PDF ready for download")
                             else:
                                 doc_url = download_response["response"].get("shipping_document_url")
                                 if doc_url:
