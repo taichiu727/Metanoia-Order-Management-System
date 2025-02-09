@@ -553,8 +553,6 @@ def initialize_session_state():
         st.session_state.status_filter = "All"
     if "show_preorders" not in st.session_state:
         st.session_state.show_preorders = False
- 
-
 
 def initialize_product_state():
     """Initialize product-related session state variables"""
@@ -619,7 +617,6 @@ def on_data_change():
             
     except Exception as e:
         st.error(f"Error saving changes: {str(e)}")
-
 
 def fetch_and_process_orders(token, db):
     """Fetch orders and process them into a DataFrame"""
@@ -809,6 +806,117 @@ def update_orders_df(original_df, edited_df):
     # Reorder columns to match original order
     return updated_df[column_order]
 
+def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
+    """Ship an order using Shopee API"""
+    timestamp = int(time.time())
+    
+    params = {
+        'partner_id': client_id,
+        'timestamp': timestamp,
+        'access_token': access_token,
+        'shop_id': shop_id,
+        'order_sn': order_sn
+    }
+
+    path = "/api/v2/logistics/ship_order"
+    sign = generate_api_signature(
+        api_type='shop',
+        partner_id=client_id,
+        path=path,
+        timestamp=timestamp,
+        access_token=access_token,
+        shop_id=shop_id,
+        client_secret=client_secret
+    )
+
+    params['sign'] = sign
+    url = f"https://partner.shopeemobile.com{path}"
+    
+    try:
+        response = requests.post(url, params=params)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error shipping order: {response.text}")
+            return None
+    except Exception as e:
+        st.error(f"Error shipping order: {str(e)}")
+        return None
+
+def create_shipping_document(access_token, client_id, client_secret, shop_id, order_sn):
+    """Create shipping document using Shopee API"""
+    timestamp = int(time.time())
+    
+    params = {
+        'partner_id': client_id,
+        'timestamp': timestamp,
+        'access_token': access_token,
+        'shop_id': shop_id,
+        'order_list': [{'order_sn': order_sn}]
+    }
+
+    path = "/api/v2/logistics/create_shipping_document"
+    sign = generate_api_signature(
+        api_type='shop',
+        partner_id=client_id,
+        path=path,
+        timestamp=timestamp,
+        access_token=access_token,
+        shop_id=shop_id,
+        client_secret=client_secret
+    )
+
+    params['sign'] = sign
+    url = f"https://partner.shopeemobile.com{path}"
+    
+    try:
+        response = requests.post(url, json=params)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error creating shipping document: {response.text}")
+            return None
+    except Exception as e:
+        st.error(f"Error creating shipping document: {str(e)}")
+        return None
+
+def download_shipping_document(access_token, client_id, client_secret, shop_id, order_sn):
+    """Download shipping document using Shopee API"""
+    timestamp = int(time.time())
+    
+    params = {
+        'partner_id': client_id,
+        'timestamp': timestamp,
+        'access_token': access_token,
+        'shop_id': shop_id,
+        'order_list': [{'order_sn': order_sn}]
+    }
+
+    path = "/api/v2/logistics/download_shipping_document"
+    sign = generate_api_signature(
+        api_type='shop',
+        partner_id=client_id,
+        path=path,
+        timestamp=timestamp,
+        access_token=access_token,
+        shop_id=shop_id,
+        client_secret=client_secret
+    )
+
+    params['sign'] = sign
+    url = f"https://partner.shopeemobile.com{path}"
+    
+    try:
+        response = requests.post(url, json=params)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error downloading shipping document: {response.text}")
+            return None
+    except Exception as e:
+        st.error(f"Error downloading shipping document: {str(e)}")
+        return None
+
 @st.fragment
 def sidebar_controls():
     """Fragment for sidebar controls"""
@@ -865,6 +973,63 @@ def order_editor(order_data, order_num, filtered_df, db):
     status_emoji = "✅" if all_received else "⚠️" if any(order_data['Received']) else "❌"
     
     with st.expander(f"Order: {order_num} {status_emoji}", expanded=True):
+        # Add shipping controls
+        col1, col2 = st.columns([3, 1])
+        with col2:
+            if st.button("出貨 🚚", key=f"ship_{order_num}"):
+                token = check_token_validity(db)
+                if token:
+                    # Ship the order
+                    shipping_response = ship_order(
+                        access_token=token["access_token"],
+                        client_id=CLIENT_ID,
+                        client_secret=CLIENT_SECRET,
+                        shop_id=SHOP_ID,
+                        order_sn=order_num
+                    )
+                    
+                    if shipping_response and shipping_response.get("response", {}).get("success"):
+                        # Create shipping document
+                        doc_response = create_shipping_document(
+                            access_token=token["access_token"],
+                            client_id=CLIENT_ID,
+                            client_secret=CLIENT_SECRET,
+                            shop_id=SHOP_ID,
+                            order_sn=order_num
+                        )
+                        
+                        if doc_response and doc_response.get("response", {}).get("success"):
+                            # Download shipping document
+                            download_response = download_shipping_document(
+                                access_token=token["access_token"],
+                                client_id=CLIENT_ID,
+                                client_secret=CLIENT_SECRET,
+                                shop_id=SHOP_ID,
+                                order_sn=order_num
+                            )
+                            
+                            if download_response and "response" in download_response:
+                                doc_url = download_response["response"].get("shipping_document_url")
+                                if doc_url:
+                                    # Open shipping document in new tab
+                                    js = f"""
+                                    <script>
+                                    window.open('{doc_url}', '_blank');
+                                    </script>
+                                    """
+                                    st.components.v1.html(js)
+                                    st.success("Order shipped successfully! Shipping document opened in new tab.")
+                                else:
+                                    st.error("Failed to get shipping document URL")
+                            else:
+                                st.error("Failed to download shipping document")
+                        else:
+                            st.error("Failed to create shipping document")
+                    else:
+                        st.error("Failed to ship order")
+                else:
+                    st.error("Invalid token. Please re-authenticate.")
+
         editor_key = f"order_{order_num}"
         
         display_data = order_data[["Order Number", "Created", "Deadline", "Product", 
