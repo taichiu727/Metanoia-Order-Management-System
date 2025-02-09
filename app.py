@@ -853,11 +853,54 @@ def get_shipping_parameter(access_token, client_id, client_secret, shop_id, orde
         st.error(f"Error getting shipping parameters: {str(e)}")
         return None
 
+def get_shipping_parameter(access_token, client_id, client_secret, shop_id, order_sn):
+    """Get shipping parameters from Shopee API"""
+    import json
+    timestamp = int(time.time())
+    
+    # URL parameters
+    params = {
+        'partner_id': client_id,
+        'timestamp': timestamp,
+        'access_token': access_token,
+        'shop_id': shop_id,
+        'order_sn': order_sn
+    }
+
+    path = "/api/v2/logistics/get_shipping_parameter"
+    sign = generate_api_signature(
+        api_type='shop',
+        partner_id=client_id,
+        path=path,
+        timestamp=timestamp,
+        access_token=access_token,
+        shop_id=shop_id,
+        client_secret=client_secret
+    )
+
+    params['sign'] = sign
+    url = f"https://partner.shopeemobile.com{path}"
+    
+    try:
+        response = requests.get(url, params=params)
+        response_data = response.json()
+        print("Shipping parameters response:", json.dumps(response_data, indent=2))
+        
+        if response.status_code == 200 and "error" not in response_data:
+            return response_data
+        else:
+            st.error(f"Error getting shipping parameters: {response_data.get('message', 'Unknown error')}")
+            return None
+    except Exception as e:
+        st.error(f"Error getting shipping parameters: {str(e)}")
+        return None
+
 def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
     """Ship an order using Shopee API"""
+    timestamp = int(time.time())
     
     # First get shipping parameters
-    shipping_params = get_shipping_parameter(
+    params_response = get_shipping_parameter(
         access_token=access_token,
         client_id=client_id,
         client_secret=client_secret,
@@ -865,50 +908,27 @@ def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
         order_sn=order_sn
     )
     
-    if not shipping_params or "response" not in shipping_params:
-        st.error("Failed to get shipping parameters")
+    if not params_response:
         return None
         
-    st.write("DEBUG - Shipping parameters response:", shipping_params)  # Debug print to Streamlit
-    print("DEBUG - Full shipping parameters:", json.dumps(shipping_params, indent=2))  # Debug print to console
+    # Extract required parameters from response
+    response_data = params_response.get("response", {})
+    info_needed = response_data.get("info_needed", {})
     
-    response_data = shipping_params.get("response", {})
-    info_needed = response_data.get("info_needed", [])
-    
-    st.write("DEBUG - Info needed:", info_needed)  # Debug print to Streamlit
-
-    # Initialize shipping request body
-    body = {
-        "order_sn": order_sn,
-        "package_number": ""
+    # Build shipping request
+    shipping_request = {
+        "order_sn": order_sn
     }
-
-    # If sender_real_name is needed, get it from the dropoff info
-    if "sender_real_name" in info_needed:
-        sender_name = response_data.get("dropoff", {}).get("sender_real_name", "")
-        st.write("DEBUG - Found sender name:", sender_name)  # Debug print to Streamlit
-        body["sender_real_name"] = sender_name
     
-    # Handle pickup if needed
-    pickup_info = response_data.get("pickup", {})
-    if pickup_info:
-        address_list = pickup_info.get("address_list", [])
-        time_slot_list = pickup_info.get("time_slot_list", [])
-        
-        if address_list:
-            body["pickup"] = {
-                "address_id": address_list[0].get("address_id", 0)
-            }
-            if time_slot_list:
-                body["pickup"]["pickup_time_id"] = time_slot_list[0].get("pickup_time_id", "")
-    
-    # Handle dropoff if needed
-    dropoff_info = response_data.get("dropoff", {})
-    if dropoff_info:
-        body["dropoff"] = dropoff_info
+    # Handle dropoff requirements
+    if "dropoff" in info_needed:
+        dropoff_needs = info_needed["dropoff"]
+        if "sender_real_name" in dropoff_needs:
+            shipping_request["sender_real_name"] = "李先生"  # Add sender name at root level
 
-    # Make the shipping request
-    timestamp = int(time.time())
+    print("Shipping request:", json.dumps(shipping_request, indent=2))
+            
+    # Make shipping request
     params = {
         'partner_id': client_id,
         'timestamp': timestamp,
@@ -931,72 +951,18 @@ def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
     url = f"https://partner.shopeemobile.com{path}"
     
     try:
-        print("Shipping request body:", json.dumps(body, indent=2))
-        response = requests.post(url, params=params, json=body)
+        response = requests.post(url, params=params, json=shipping_request)
         response_data = response.json()
         print("Shipping response:", json.dumps(response_data, indent=2))
         
-        if response.status_code == 200:
-            if "error" not in response_data or response_data.get("error", "") == "":
-                return response_data
-            else:
-                error_msg = response_data.get("message", "Unknown error")
-                error_code = response_data.get("error", "")
-                st.error(f"Shopee API Error: {error_msg} (Code: {error_code})")
-                return None
+        if response.status_code == 200 and "error" not in response_data:
+            return response_data
         else:
-            st.error(f"HTTP Error {response.status_code}: {response.text}")
+            st.error(f"Shopee API Error: {response_data.get('message', 'Unknown error')} "
+                    f"(Code: {response_data.get('error', 'Unknown error')})")
             return None
     except Exception as e:
         st.error(f"Error shipping order: {str(e)}")
-        return None
-
-def create_shipping_document(access_token, client_id, client_secret, shop_id, order_sn):
-    """Create shipping document using Shopee API"""
-    timestamp = int(time.time())
-    
-    body = {
-        'order_list': [{'order_sn': order_sn}]
-    }
-    
-    params = {
-        'partner_id': client_id,
-        'timestamp': timestamp,
-        'access_token': access_token,
-        'shop_id': shop_id
-    }
-
-    path = "/api/v2/logistics/create_shipping_document"
-    sign = generate_api_signature(
-        api_type='shop',
-        partner_id=client_id,
-        path=path,
-        timestamp=timestamp,
-        access_token=access_token,
-        shop_id=shop_id,
-        client_secret=client_secret
-    )
-
-    params['sign'] = sign
-    url = f"https://partner.shopeemobile.com{path}"
-    
-    try:
-        response = requests.post(url, params=params, json=body)
-        response_data = response.json()
-        
-        if response.status_code == 200:
-            if "error" not in response_data or response_data.get("error", "") == "":
-                return response_data
-            else:
-                error_msg = response_data.get("message", "Unknown error")
-                error_code = response_data.get("error", "")
-                st.error(f"Shopee API Error: {error_msg} (Code: {error_code})")
-                return None
-        else:
-            st.error(f"Error creating shipping document: {response.text}")
-            return None
-    except Exception as e:
-        st.error(f"Error creating shipping document: {str(e)}")
         return None
 
 def download_shipping_document(access_token, client_id, client_secret, shop_id, order_sn):
