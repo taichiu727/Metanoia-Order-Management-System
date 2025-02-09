@@ -973,18 +973,18 @@ def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
         st.error(f"Error shipping order: {str(e)}")
         return None
 
-def create_shipping_document(access_token, client_id, client_secret, shop_id, order_sn):
+def create_shipping_document(access_token, client_id, client_secret, shop_id, order_sn, request_body=None):
     """Create shipping document using Shopee API"""
     timestamp = int(time.time())
     
-    # Request body
-    # Request body
-    body = {
-        'order_list': [{
-            'order_sn': order_sn
-        }],
-        'shop_id': shop_id
-    }
+    # Use provided request body or create default
+    if request_body is None:
+        request_body = {
+            'order_list': [{
+                'order_sn': order_sn
+            }],
+            'shop_id': shop_id
+        }
     
     params = {
         'partner_id': client_id,
@@ -1007,12 +1007,9 @@ def create_shipping_document(access_token, client_id, client_secret, shop_id, or
     params['sign'] = sign
     url = f"https://partner.shopeemobile.com{path}"
     
-    st.write("DEBUG - Create Document Request:", body)
-    
     try:
-        response = requests.post(url, params=params, json=body)
+        response = requests.post(url, params=params, json=request_body)
         response_data = response.json()
-        st.write("DEBUG - Create Document Response:", response_data)
         
         if response.status_code == 200:
             if "error" not in response_data or not response_data.get("error"):
@@ -1027,6 +1024,49 @@ def create_shipping_document(access_token, client_id, client_secret, shop_id, or
             return None
     except Exception as e:
         st.error(f"Error creating shipping document: {str(e)}")
+        return None
+    
+def get_tracking_number(access_token, client_id, client_secret, shop_id, order_sn):
+    """Get tracking number from Shopee API"""
+    timestamp = int(time.time())
+    
+    params = {
+        'partner_id': client_id,
+        'timestamp': timestamp,
+        'access_token': access_token,
+        'shop_id': shop_id,
+        'order_sn': order_sn,
+        'response_optional_fields': 'first_mile_tracking_number,last_mile_tracking_number'
+    }
+
+    path = "/api/v2/logistics/get_tracking_number"
+    sign = generate_api_signature(
+        api_type='shop',
+        partner_id=client_id,
+        path=path,
+        timestamp=timestamp,
+        access_token=access_token,
+        shop_id=shop_id,
+        client_secret=client_secret
+    )
+
+    params['sign'] = sign
+    url = f"https://partner.shopeemobile.com{path}"
+    
+    try:
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            data = response.json()
+            if "error" not in data or not data.get("error"):
+                return data
+            else:
+                st.error(f"API Error: {data.get('message', 'Unknown error')}")
+                return None
+        else:
+            st.error(f"HTTP Error {response.status_code}: {response.text}")
+            return None
+    except Exception as e:
+        st.error(f"Error getting tracking number: {str(e)}")
         return None
 
 def download_shipping_document(access_token, client_id, client_secret, shop_id, order_sn):
@@ -1155,14 +1195,43 @@ def order_editor(order_data, order_num, filtered_df, db):
             if st.button("列印 🖨️", key=f"print_{order_num}"):
                 token = check_token_validity(db)
                 if token:
-                    # Create shipping document
+                    # Get tracking number first
+                    st.info("Getting tracking number...")
+                    tracking_number = None
+                    max_attempts = 3
+                    for attempt in range(max_attempts):
+                        tracking_data = get_tracking_number(
+                            access_token=token["access_token"],
+                            client_id=CLIENT_ID,
+                            client_secret=CLIENT_SECRET,
+                            shop_id=SHOP_ID,
+                            order_sn=order_num
+                        )
+                        if tracking_data and tracking_data.get("response", {}).get("tracking_number"):
+                            tracking_number = tracking_data["response"]["tracking_number"]
+                            st.success(f"Got tracking number: {tracking_number}")
+                            break
+                        if attempt < max_attempts - 1:
+                            st.warning(f"Retrying... ({attempt + 1}/{max_attempts})")
+                            time.sleep(5)
+                    
+                    # Create shipping document with tracking number
                     st.info("Creating shipping document...")
+                    doc_request = {
+                        'order_list': [{
+                            'order_sn': order_num,
+                            'tracking_number': tracking_number
+                        }],
+                        'shop_id': SHOP_ID
+                    }
+                    
                     doc_response = create_shipping_document(
                         access_token=token["access_token"],
                         client_id=CLIENT_ID,
                         client_secret=CLIENT_SECRET,
                         shop_id=SHOP_ID,
-                        order_sn=order_num
+                        order_sn=order_num,
+                        request_body=doc_request  # Pass the request body with tracking number
                     )
                     
                     if doc_response and ("error" not in doc_response or doc_response.get("error") == ""):
@@ -1195,6 +1264,8 @@ def order_editor(order_data, order_num, filtered_df, db):
                         st.error("Failed to create shipping document")
                 else:
                     st.error("Invalid token. Please re-authenticate.")
+
+
 
         editor_key = f"order_{order_num}"
         
