@@ -812,7 +812,6 @@ def get_shipping_parameter(access_token, client_id, client_secret, shop_id, orde
 
     timestamp = int(time.time())
     
-    # URL parameters
     params = {
         'partner_id': client_id,
         'timestamp': timestamp,
@@ -859,74 +858,10 @@ def get_shipping_parameter(access_token, client_id, client_secret, shop_id, orde
         st.error(f"Error getting shipping parameters: {str(e)}")
         return None
 
-def get_order_detail(access_token, client_id, client_secret, shop_id, order_sn):
-    """Get order details including recipient name"""
-    timestamp = int(time.time())
-    
-    params = {
-        'partner_id': client_id,
-        'timestamp': timestamp,
-        'access_token': access_token,
-        'shop_id': shop_id,
-        'order_sn_list': order_sn,  # Pass the order_sn directly
-        'response_optional_fields': 'recipient_address'  # Request recipient address info
-    }
-
-    path = "/api/v2/order/get_order_detail"
-    sign = generate_api_signature(
-        api_type='shop',
-        partner_id=client_id,
-        path=path,
-        timestamp=timestamp,
-        access_token=access_token,
-        shop_id=shop_id,
-        client_secret=client_secret
-    )
-
-    params['sign'] = sign
-    url = f"https://partner.shopeemobile.com{path}"
-    
-    try:
-        response = requests.get(url, params=params)
-        response_data = response.json()
-        st.write("DEBUG - Order Detail Response:", response_data)
-        return response_data
-    except Exception as e:
-        st.error(f"Error getting order detail: {str(e)}")
-        return None
-
 def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
     """Ship an order using Shopee API"""
-
+   
     timestamp = int(time.time())
-    
-    # First get order details to get recipient name
-    order_detail = get_order_detail(
-        access_token=access_token,
-        client_id=client_id,
-        client_secret=client_secret,
-        shop_id=shop_id,
-        order_sn=order_sn
-    )
-    
-    if not order_detail or "response" not in order_detail:
-        st.error("Failed to get order details")
-        return None
-        
-    # Extract recipient name from order details
-    order_list = order_detail["response"].get("order_list", [])
-    if not order_list:
-        st.error("No order details found")
-        return None
-        
-    recipient_address = order_list[0].get("recipient_address", {})
-    recipient_name = recipient_address.get("name")
-    
-    if not recipient_name:
-        st.error("Could not get recipient name from order details")
-        return None
-    
-    st.write("DEBUG - Found recipient name:", recipient_name)
     
     # Get shipping parameters
     params_response = get_shipping_parameter(
@@ -946,16 +881,12 @@ def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
     
     # Build shipping request with basic info
     shipping_request = {
-        "order_sn": order_sn
+        "order_sn": order_sn,
+        "dropoff": {
+            "sender_real_name": "邱泰滕"  # Fixed sender name
+        }
     }
     
-    # If dropoff method with sender_real_name is needed
-    if "dropoff" in info_needed and "sender_real_name" in info_needed["dropoff"]:
-        shipping_request["dropoff"] = {
-            "sender_real_name": recipient_name
-        }
-        st.write("DEBUG - Using recipient name as sender:", recipient_name)
-
     st.write("DEBUG - Final shipping request:", shipping_request)
 
     # Make shipping request
@@ -999,6 +930,8 @@ def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
     except Exception as e:
         st.error(f"Error shipping order: {str(e)}")
         return None
+
+
 
 def download_shipping_document(access_token, client_id, client_secret, shop_id, order_sn):
     """Download shipping document using Shopee API"""
