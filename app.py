@@ -855,6 +855,8 @@ def get_shipping_parameter(access_token, client_id, client_secret, shop_id, orde
 
 def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
     """Ship an order using Shopee API"""
+    import json
+    
     # First get shipping parameters
     shipping_params = get_shipping_parameter(
         access_token=access_token,
@@ -868,41 +870,32 @@ def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
         st.error("Failed to get shipping parameters")
         return None
         
-    # Log shipping parameters for debugging
     print("Shipping parameters response:", json.dumps(shipping_params, indent=2))
-    info_needed = shipping_params["response"].get("info_needed", [])
-        
-    # Initialize shipping request body based on info_needed
-    info_needed = shipping_params["response"].get("info_needed", [])
+    response_data = shipping_params.get("response", {})
+    
+    # Initialize shipping request body
     body = {
         "order_sn": order_sn,
         "package_number": ""
     }
     
-    # Add pickup info if needed
-    if "pickup" in info_needed:
-        pickup_info = shipping_params["response"].get("pickup", {})
+    # Handle pickup if needed
+    pickup_info = response_data.get("pickup", {})
+    if pickup_info:
         address_list = pickup_info.get("address_list", [])
         time_slot_list = pickup_info.get("time_slot_list", [])
         
         if address_list:
             body["pickup"] = {
-                "address_id": address_list[0].get("address_id", 0)  # Use first available address
+                "address_id": address_list[0].get("address_id", 0)
             }
             if time_slot_list:
-                body["pickup"]["pickup_time_id"] = time_slot_list[0].get("id", "")  # Use first available time slot
+                body["pickup"]["pickup_time_id"] = time_slot_list[0].get("pickup_time_id", "")
     
-    # Check what info is needed from the response
-    if "sender_real_name" in info_needed:
-        body["sender_real_name"] = st.session_state.sender_name
-    
-    # Add dropoff info if needed
-    if "dropoff" in info_needed:
-        body["dropoff"] = {}
-        
-    # Add non-integrated info if needed
-    if "non-integrated" in info_needed:
-        body["non_integrated"] = {}
+    # Handle dropoff if needed
+    dropoff_info = response_data.get("dropoff", {})
+    if dropoff_info:
+        body["dropoff"] = dropoff_info
 
     # Make the shipping request
     timestamp = int(time.time())
@@ -928,8 +921,10 @@ def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
     url = f"https://partner.shopeemobile.com{path}"
     
     try:
+        print("Shipping request body:", json.dumps(body, indent=2))
         response = requests.post(url, params=params, json=body)
         response_data = response.json()
+        print("Shipping response:", json.dumps(response_data, indent=2))
         
         if response.status_code == 200:
             if "error" not in response_data or response_data.get("error", "") == "":
