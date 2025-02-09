@@ -15,6 +15,7 @@ import time
 from datetime import datetime, timedelta
 import psycopg2
 from psycopg2.extras import RealDictCursor
+import json
 
 # Database Configuration
 DATABASE_URL = "postgresql://neondb_owner:npg_r9iSFwQd4zAT@ep-white-sky-a1mrgmyd-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require"
@@ -32,6 +33,7 @@ class OrderDatabase:
                 SELECT 
                     order_sn,
                     product_name,
+                    item_spec,
                     received,
                     missing_count,
                     note
@@ -62,13 +64,15 @@ class OrderDatabase:
                 CREATE TABLE IF NOT EXISTS order_tracking (
                     order_sn VARCHAR(50),
                     product_name TEXT,
+                    item_spec TEXT,
                     received BOOLEAN DEFAULT FALSE,
                     missing_count INTEGER DEFAULT 0,
                     note TEXT,
                     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    PRIMARY KEY (order_sn, product_name)
+                    PRIMARY KEY (order_sn, product_name, item_spec)
                 )
             """)
+            self.conn.commit()
 
 
             # New shopee_token table
@@ -114,6 +118,15 @@ class OrderDatabase:
     def save_token(self, token_data):
         try:
             self.connect()
+            # Ensure refresh token data is properly set
+            token_data = token_data.copy()  # Create a copy to avoid modifying the original
+            if "refresh_token_expire_in" not in token_data:
+                token_data["refresh_token_expire_in"] = 365 * 24 * 60 * 60  # 1 year in seconds
+            if "refresh_token_fetch_time" not in token_data:
+                token_data["refresh_token_fetch_time"] = int(time.time())
+            if "fetch_time" not in token_data:
+                token_data["fetch_time"] = int(time.time())
+                
             self.cursor.execute("""
                 INSERT INTO shopee_token (
                     access_token, refresh_token, expire_in, fetch_time,
@@ -136,11 +149,11 @@ class OrderDatabase:
                 token_data["access_token"],
                 token_data["refresh_token"],
                 token_data["expire_in"],
-                token_data.get("fetch_time", int(time.time())),
+                token_data["fetch_time"],
                 token_data.get("shop_id", SHOP_ID),
                 token_data.get("merchant_id"),
-                token_data.get("refresh_token_expire_in", 365 * 24 * 60 * 60),  # Default 1 year
-                token_data.get("refresh_token_fetch_time", int(time.time())),
+                token_data["refresh_token_expire_in"],
+                token_data["refresh_token_fetch_time"],
             ))
             self.conn.commit()
             return self.cursor.fetchone()["id"]
@@ -153,7 +166,8 @@ class OrderDatabase:
             self.cursor.execute("""
                 SELECT 
                     access_token, refresh_token, expire_in, fetch_time,
-                    shop_id, merchant_id
+                    shop_id, merchant_id, refresh_token_expire_in,
+                    refresh_token_fetch_time
                 FROM shopee_token
                 ORDER BY updated_at DESC
                 LIMIT 1
@@ -170,19 +184,21 @@ class OrderDatabase:
         finally:
             self.close()
 
-    def upsert_order_tracking(self, order_sn, product_name, received, missing_count, note):
+    def upsert_order_tracking(self, order_sn, product_name, item_spec, received, missing_count, note):
         try:
             self.connect()
             self.cursor.execute("""
-                INSERT INTO order_tracking (order_sn, product_name, received, missing_count, note, last_updated)
-                VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                ON CONFLICT (order_sn, product_name) 
+                INSERT INTO order_tracking (
+                    order_sn, product_name, item_spec, received, missing_count, note, last_updated
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT (order_sn, product_name, item_spec) 
                 DO UPDATE SET 
                     received = EXCLUDED.received,
                     missing_count = EXCLUDED.missing_count,
                     note = EXCLUDED.note,
                     last_updated = CURRENT_TIMESTAMP
-            """, (order_sn, product_name, received, missing_count, note))
+            """, (order_sn, product_name, item_spec, received, missing_count, note))
             self.conn.commit()
         finally:
             self.close()
@@ -203,21 +219,19 @@ class OrderDatabase:
     def batch_upsert_order_tracking(self, records):
         try:
             self.connect()
-            # Add transaction management
             with self.conn:
                 self.cursor.executemany("""
-                    INSERT INTO order_tracking (order_sn, product_name, received, missing_count, note, last_updated)
-                    VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                    ON CONFLICT (order_sn, product_name) 
+                    INSERT INTO order_tracking (
+                        order_sn, product_name, item_spec, received, missing_count, note, last_updated
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (order_sn, product_name, item_spec) 
                     DO UPDATE SET 
                         received = EXCLUDED.received,
                         missing_count = EXCLUDED.missing_count,
                         note = EXCLUDED.note,
                         last_updated = CURRENT_TIMESTAMP
                 """, records)
-        except psycopg2.Error as e:
-            st.error(f"Database error: {str(e)}")
-            raise
         finally:
             self.close()
     def get_product_tags(self):
@@ -516,15 +530,12 @@ def initialize_session_state():
         unsafe_allow_html=True
     )
     if "authentication_state" not in st.session_state:
-        st.session_state.authentication_state = "initial"
-        # Check for existing valid token
         db = OrderDatabase()
-        token = db.load_token()
+        token = check_token_validity(db)  # Use the existing token validation logic
         if token:
-            current_time = int(time.time())
-            token_age = current_time - token["fetch_time"]
-            if token_age < (token["expire_in"] - 300):  # Token is still valid
-                st.session_state.authentication_state = "complete"
+            st.session_state.authentication_state = "complete"
+        else:
+            st.session_state.authentication_state = "initial"
     
     # Initialize all required session state variables
     if "orders" not in st.session_state:
@@ -543,7 +554,6 @@ def initialize_session_state():
         st.session_state.status_filter = "All"
     if "show_preorders" not in st.session_state:
         st.session_state.show_preorders = False
-
 
 def initialize_product_state():
     """Initialize product-related session state variables"""
@@ -609,7 +619,6 @@ def on_data_change():
     except Exception as e:
         st.error(f"Error saving changes: {str(e)}")
 
-
 def fetch_and_process_orders(token, db):
     """Fetch orders and process them into a DataFrame"""
     with st.spinner("Fetching orders..."):
@@ -645,9 +654,9 @@ def fetch_and_process_orders(token, db):
         order_details_list.sort(key=lambda x: x['create_time'], reverse=True)
         st.session_state.order_details = order_details_list
 
-        # Process orders into DataFrame
+        # Process orders into DataFrame with item_spec in the tracking key
         tracking_data = {
-            (item['order_sn'], item['product_name']): item 
+            (item['order_sn'], item['product_name'], item['item_spec']): item 
             for item in db.get_order_tracking()
         }
         
@@ -656,7 +665,7 @@ def fetch_and_process_orders(token, db):
             if "item_list" in order_detail:
                 for item in order_detail["item_list"]:
                     tracking = tracking_data.get(
-                        (order_detail["order_sn"], item["item_name"]), 
+                        (order_detail["order_sn"], item["item_name"], item["model_name"]), 
                         {'received': False, 'missing_count': 0, 'note': ''}
                     )
                     orders_data.append({
@@ -798,6 +807,295 @@ def update_orders_df(original_df, edited_df):
     # Reorder columns to match original order
     return updated_df[column_order]
 
+def get_shipping_parameter(access_token, client_id, client_secret, shop_id, order_sn):
+    """Get shipping parameters from Shopee API"""
+ 
+    timestamp = int(time.time())
+    
+    params = {
+        'partner_id': client_id,
+        'timestamp': timestamp,
+        'access_token': access_token,
+        'shop_id': shop_id,
+        'order_sn': order_sn
+    }
+
+    path = "/api/v2/logistics/get_shipping_parameter"
+    sign = generate_api_signature(
+        api_type='shop',
+        partner_id=client_id,
+        path=path,
+        timestamp=timestamp,
+        access_token=access_token,
+        shop_id=shop_id,
+        client_secret=client_secret
+    )
+
+    params['sign'] = sign
+    url = f"https://partner.shopeemobile.com{path}"
+    
+    st.write("DEBUG - Getting shipping parameters")
+    
+    try:
+        response = requests.get(url, params=params)
+        st.write("DEBUG - Response Status:", response.status_code)
+        
+        response_data = response.json()
+        st.write("DEBUG - Full Response:", response_data)
+        
+        if response.status_code == 200:
+            if "error" not in response_data or not response_data.get("error"):
+                return response_data
+            else:
+                error_msg = response_data.get("message", "Unknown error")
+                error_code = response_data.get("error", "")
+                st.error(f"API Error: {error_msg} (Code: {error_code})")
+                return None
+        else:
+            st.error(f"HTTP Error {response.status_code}: {response.text}")
+            return None
+    except Exception as e:
+        st.error(f"Error getting shipping parameters: {str(e)}")
+        return None
+
+def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
+    """Ship an order using Shopee API"""
+    timestamp = int(time.time())
+    
+    # Get shipping parameters
+    params_response = get_shipping_parameter(
+        access_token=access_token,
+        client_id=client_id,
+        client_secret=client_secret,
+        shop_id=shop_id,
+        order_sn=order_sn
+    )
+    
+    if not params_response:
+        return None
+        
+    # Extract required parameters from response
+    response_data = params_response.get("response", {})
+    info_needed = response_data.get("info_needed", {})
+    
+    # Build shipping request with basic info
+    shipping_request = {
+        "order_sn": order_sn,
+        "dropoff": {
+            "sender_real_name": "邱泰滕"  # Fixed sender name
+        }
+    }
+    
+    st.write("DEBUG - Final shipping request:", shipping_request)
+
+    # Make shipping request
+    params = {
+        'partner_id': client_id,
+        'timestamp': timestamp,
+        'access_token': access_token,
+        'shop_id': shop_id
+    }
+
+    path = "/api/v2/logistics/ship_order"
+    sign = generate_api_signature(
+        api_type='shop',
+        partner_id=client_id,
+        path=path,
+        timestamp=timestamp,
+        access_token=access_token,
+        shop_id=shop_id,
+        client_secret=client_secret
+    )
+
+    params['sign'] = sign
+    url = f"https://partner.shopeemobile.com{path}"
+    
+    try:
+        response = requests.post(url, params=params, json=shipping_request)
+        response_data = response.json()
+        st.write("DEBUG - Shipping response:", response_data)
+        
+        if response.status_code == 200:
+            if "error" not in response_data or response_data.get("error") == "":
+                st.success("Order shipped successfully!")
+                return response_data
+            else:
+                error_msg = response_data.get("message", "Unknown error")
+                error_code = response_data.get("error", "")
+                st.error(f"Shopee API Error: {error_msg} (Code: {error_code})")
+                return None
+        else:
+            st.error(f"HTTP Error {response.status_code}: {response.text}")
+            return None
+    except Exception as e:
+        st.error(f"Error shipping order: {str(e)}")
+        return None
+
+def create_shipping_document(access_token, client_id, client_secret, shop_id, order_sn, request_body=None):
+    """Create shipping document using Shopee API"""
+    timestamp = int(time.time())
+    
+    # Use provided request body or create default
+    if request_body is None:
+        request_body = {
+            'order_list': [{
+                'order_sn': order_sn
+            }],
+            'shop_id': shop_id
+        }
+    
+    params = {
+        'partner_id': client_id,
+        'timestamp': timestamp,
+        'access_token': access_token,
+        'shop_id': shop_id
+    }
+
+    path = "/api/v2/logistics/create_shipping_document"
+    sign = generate_api_signature(
+        api_type='shop',
+        partner_id=client_id,
+        path=path,
+        timestamp=timestamp,
+        access_token=access_token,
+        shop_id=shop_id,
+        client_secret=client_secret
+    )
+
+    params['sign'] = sign
+    url = f"https://partner.shopeemobile.com{path}"
+    
+    try:
+        response = requests.post(url, params=params, json=request_body)
+        response_data = response.json()
+        
+        if response.status_code == 200:
+            if "error" not in response_data or not response_data.get("error"):
+                return response_data
+            else:
+                error_msg = response_data.get("message", "Unknown error")
+                error_code = response_data.get("error", "")
+                st.error(f"Error creating shipping document: {error_msg} (Code: {error_code})")
+                return None
+        else:
+            st.error(f"Error creating shipping document: {response.text}")
+            return None
+    except Exception as e:
+        st.error(f"Error creating shipping document: {str(e)}")
+        return None
+    
+def get_tracking_number(access_token, client_id, client_secret, shop_id, order_sn):
+    """Get tracking number from Shopee API"""
+    timestamp = int(time.time())
+    
+    params = {
+        'partner_id': client_id,
+        'timestamp': timestamp,
+        'access_token': access_token,
+        'shop_id': shop_id,
+        'order_sn': order_sn,
+        'response_optional_fields': 'first_mile_tracking_number,last_mile_tracking_number'
+    }
+
+    path = "/api/v2/logistics/get_tracking_number"
+    sign = generate_api_signature(
+        api_type='shop',
+        partner_id=client_id,
+        path=path,
+        timestamp=timestamp,
+        access_token=access_token,
+        shop_id=shop_id,
+        client_secret=client_secret
+    )
+
+    params['sign'] = sign
+    url = f"https://partner.shopeemobile.com{path}"
+    
+    try:
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            data = response.json()
+            if "error" not in data or not data.get("error"):
+                return data
+            else:
+                st.error(f"API Error: {data.get('message', 'Unknown error')}")
+                return None
+        else:
+            st.error(f"HTTP Error {response.status_code}: {response.text}")
+            return None
+    except Exception as e:
+        st.error(f"Error getting tracking number: {str(e)}")
+        return None
+
+def download_shipping_document(access_token, client_id, client_secret, shop_id, order_sn):
+    timestamp = int(time.time())
+    
+    body = {
+        'order_list': [{
+            'order_sn': order_sn,
+        }],
+        'shop_id': shop_id
+    }
+    
+    params = {
+        'partner_id': client_id,
+        'timestamp': timestamp,
+        'access_token': access_token,
+        'shop_id': shop_id
+    }
+
+    path = "/api/v2/logistics/download_shipping_document"
+    sign = generate_api_signature(
+        api_type='shop',
+        partner_id=client_id,
+        path=path,
+        timestamp=timestamp,
+        access_token=access_token,
+        shop_id=shop_id,
+        client_secret=client_secret
+    )
+
+    params['sign'] = sign
+    url = f"https://partner.shopeemobile.com{path}"
+    
+    try:
+        headers = {
+            'Content-Type': 'application/json'
+        }
+        response = requests.post(url, params=params, json=body, headers=headers)
+        
+        if response.status_code != 200:
+            st.error(f"HTTP Error {response.status_code}: {response.text}")
+            return None
+            
+        content_type = response.headers.get('content-type', '').lower()
+        
+        if 'text/html' in content_type:
+            return {
+                "response": {
+                    "type": "html",
+                    "content": response.text
+                }
+            }
+        elif 'application/pdf' in content_type:
+            import base64
+            pdf_data = base64.b64encode(response.content).decode('utf-8')
+            return {
+                "response": {
+                    "type": "pdf",
+                    "content": pdf_data
+                }
+            }
+        elif 'application/json' in content_type:
+            return response.json()
+        else:
+            st.error(f"Unsupported content type: {content_type}")
+            return None
+            
+    except Exception as e:
+        st.error(f"Error downloading shipping document: {str(e)}")
+        return None
+
 @st.fragment
 def sidebar_controls():
     """Fragment for sidebar controls"""
@@ -831,62 +1129,348 @@ def sidebar_controls():
             st.session_state.clear()
             st.rerun()
 
+@st.cache_data
+def get_column_config():
+    return {
+        "Order Number": st.column_config.TextColumn("Order Number", width="small"),
+        "Created": st.column_config.TextColumn("Created", width="small"),
+        "Deadline": st.column_config.TextColumn("Deadline", width="small"),
+        "Product": st.column_config.TextColumn("Product", width="medium"),
+        "Item Spec": st.column_config.TextColumn("Item Spec", width="small"),
+        "Item Number": st.column_config.TextColumn("Item Number", width="small"),
+        "Quantity": st.column_config.NumberColumn("Quantity", width="small"),
+        "Image": st.column_config.ImageColumn("Image", width="small"),
+        "Tag": st.column_config.TextColumn("Tag", width="small", required=False),
+        "Received": st.column_config.CheckboxColumn("Received", width="small", default=False),
+        "Missing": st.column_config.NumberColumn("Missing", width="small", default=0),
+        "Note": st.column_config.TextColumn("Note", width="medium", default="")
+    }
+
+@st.fragment
+def order_editor(order_data, order_num, filtered_df, db):
+    all_received = all(order_data['Received'])
+    status_emoji = "✅" if all_received else "⚠️" if any(order_data['Received']) else "❌"
+    
+    with st.expander(f"Order: {order_num} {status_emoji}", expanded=True):
+        # Add shipping controls
+        col1, col2, col3 = st.columns([2, 1, 1])
+        with col2:
+            if st.button("出貨 🚚", key=f"ship_{order_num}"):
+                token = check_token_validity(db)
+                if token:
+                    # Ship the order
+                    st.info("Step 1/3: Shipping order...")
+                    shipping_response = ship_order(
+                        access_token=token["access_token"],
+                        client_id=CLIENT_ID,
+                        client_secret=CLIENT_SECRET,
+                        shop_id=SHOP_ID,
+                        order_sn=order_num
+                    )
+                    
+                    if shipping_response:
+                        # Get tracking number
+                        st.info("Step 2/3: Getting tracking number...")
+                        tracking_number = None
+                        max_attempts = 3
+                        for attempt in range(max_attempts):
+                            tracking_data = get_tracking_number(
+                                access_token=token["access_token"],
+                                client_id=CLIENT_ID,
+                                client_secret=CLIENT_SECRET,
+                                shop_id=SHOP_ID,
+                                order_sn=order_num
+                            )
+                            if tracking_data and tracking_data.get("response", {}).get("tracking_number"):
+                                tracking_number = tracking_data["response"]["tracking_number"]
+                                st.success(f"Got tracking number: {tracking_number}")
+                                break
+                            if attempt < max_attempts - 1:
+                                st.warning(f"Retrying... ({attempt + 1}/{max_attempts})")
+                                time.sleep(5)
+                        
+                        # Create shipping document with tracking number
+                        st.info("Step 3/3: Creating shipping document...")
+                        doc_request = {
+                            'order_list': [{
+                                'order_sn': order_num,
+                                'tracking_number': tracking_number
+                            }],
+                            'shop_id': SHOP_ID
+                        }
+                        
+                        doc_response = create_shipping_document(
+                            access_token=token["access_token"],
+                            client_id=CLIENT_ID,
+                            client_secret=CLIENT_SECRET,
+                            shop_id=SHOP_ID,
+                            order_sn=order_num,
+                            request_body=doc_request
+                        )
+                        
+                        if doc_response and ("error" not in doc_response or doc_response.get("error") == ""):
+                            download_response = download_shipping_document(
+                                access_token=token["access_token"],
+                                client_id=CLIENT_ID,
+                                client_secret=CLIENT_SECRET,
+                                shop_id=SHOP_ID,
+                                order_sn=order_num
+                            )
+                            
+                            if download_response and "response" in download_response:
+                                response_type = download_response["response"].get("type")
+                                
+                                if response_type == "html":
+                                    html_content = download_response["response"]["content"]
+                                    html_content = html_content.replace(
+                                        '<form method="post"',
+                                        '<form method="post" target="_blank"'
+                                    )
+                                    html_content = html_content.replace(
+                                        '</form>',
+                                        '</form><script>document.getElementById("form").submit();</script>'
+                                    )
+                                    st.components.v1.html(html_content, height=0)
+                                    st.success("Shipping document should open automatically")
+                                elif response_type == "pdf":
+                                    pdf_data = download_response["response"]["content"]
+                                    html_content = f"""
+                                    <html><body><script>
+                                        var pdfData = "{pdf_data}";
+                                        var byteCharacters = atob(pdfData);
+                                        var byteNumbers = new Array(byteCharacters.length);
+                                        for (var i = 0; i < byteCharacters.length; i++) {{
+                                            byteNumbers[i] = byteCharacters.charCodeAt(i);
+                                        }}
+                                        var byteArray = new Uint8Array(byteNumbers);
+                                        var file = new Blob([byteArray], {{ type: 'application/pdf' }});
+                                        var fileURL = URL.createObjectURL(file);
+                                        window.open(fileURL, '_blank');
+                                    </script></body></html>
+                                    """
+                                    st.components.v1.html(html_content, height=0)
+                                    st.success("PDF should open in new tab")
+                                else:
+                                    st.error("Unsupported document type")
+                            else:
+                                st.error("Failed to download shipping document")
+                        else:
+                            st.error("Failed to create shipping document")
+                else:
+                    st.error("Invalid token. Please re-authenticate.")
+
+        with col3:
+            if st.button("列印 🖨️", key=f"print_{order_num}"):
+                token = check_token_validity(db)
+                if token:
+                    # Get tracking number first
+                    st.info("Getting tracking number...")
+                    tracking_number = None
+                    max_attempts = 3
+                    for attempt in range(max_attempts):
+                        tracking_data = get_tracking_number(
+                            access_token=token["access_token"],
+                            client_id=CLIENT_ID,
+                            client_secret=CLIENT_SECRET,
+                            shop_id=SHOP_ID,
+                            order_sn=order_num
+                        )
+                        if tracking_data and tracking_data.get("response", {}).get("tracking_number"):
+                            tracking_number = tracking_data["response"]["tracking_number"]
+                            st.success(f"Got tracking number: {tracking_number}")
+                            break
+                        if attempt < max_attempts - 1:
+                            st.warning(f"Retrying... ({attempt + 1}/{max_attempts})")
+                            time.sleep(5)
+                    
+                    # Create shipping document with tracking number
+                    st.info("Creating shipping document...")
+                    doc_request = {
+                        'order_list': [{
+                            'order_sn': order_num,
+                            'tracking_number': tracking_number
+                        }],
+                        'shop_id': SHOP_ID
+                    }
+                    
+                    doc_response = create_shipping_document(
+                        access_token=token["access_token"],
+                        client_id=CLIENT_ID,
+                        client_secret=CLIENT_SECRET,
+                        shop_id=SHOP_ID,
+                        order_sn=order_num,
+                        request_body=doc_request  # Pass the request body with tracking number
+                    )
+                    
+                    if doc_response and ("error" not in doc_response or doc_response.get("error") == ""):
+                        # Download shipping document
+                        st.info("Downloading shipping document...")
+                        download_response = download_shipping_document(
+                            access_token=token["access_token"],
+                            client_id=CLIENT_ID,
+                            client_secret=CLIENT_SECRET,
+                            shop_id=SHOP_ID,
+                            order_sn=order_num
+                        )
+                        
+                        if download_response and "response" in download_response:
+                            response_type = download_response["response"].get("type")
+                            
+                            if response_type == "html":
+                                html_content = download_response["response"]["content"]
+                                html_content = html_content.replace(
+                                    '<form method="post"',
+                                    '<form method="post" target="_blank"'
+                                )
+                                html_content = html_content.replace(
+                                    '</form>',
+                                    '</form><script>document.getElementById("form").submit();</script>'
+                                )
+                                st.components.v1.html(html_content, height=0)
+                                st.success("Shipping document should open automatically")
+                            elif response_type == "pdf":
+                                pdf_data = download_response["response"]["content"]
+                                
+                                # Create HTML to open PDF in new tab
+                                html_content = f"""
+                                <html>
+                                <body>
+                                <script>
+                                    var pdfData = "{pdf_data}";
+                                    var byteCharacters = atob(pdfData);
+                                    var byteNumbers = new Array(byteCharacters.length);
+                                    for (var i = 0; i < byteCharacters.length; i++) {{
+                                        byteNumbers[i] = byteCharacters.charCodeAt(i);
+                                    }}
+                                    var byteArray = new Uint8Array(byteNumbers);
+                                    var file = new Blob([byteArray], {{ type: 'application/pdf' }});
+                                    var fileURL = URL.createObjectURL(file);
+                                    window.open(fileURL, '_blank');
+                                </script>
+                                </body>
+                                </html>
+                                """
+                                st.components.v1.html(html_content, height=0)
+                                st.success("PDF should open in new tab")
+                            else:
+                                doc_url = download_response["response"].get("shipping_document_url")
+                                if doc_url:
+                                    st.components.v1.html(
+                                        f'<script>window.open("{doc_url}", "_blank");</script>',
+                                        height=0
+                                    )
+                                    st.success("Shipping document opened in new tab!")
+                                else:
+                                    st.error("No shipping document URL found")
+                        else:
+                            st.error("Failed to download shipping document")
+                    else:
+                        st.error("Failed to create shipping document")
+                else:
+                    st.error("Invalid token. Please re-authenticate.")
+
+
+
+        editor_key = f"order_{order_num}"
+        
+        display_data = order_data[["Order Number", "Created", "Deadline", "Product", 
+                                "Item Spec", "Item Number", "Quantity", "Image", 
+                                "Received", "Missing", "Note", "Tag"]]
+        
+        edited_df = st.data_editor(
+            display_data,
+            column_config=get_column_config(),
+            use_container_width=True,
+            key=editor_key,
+            num_rows="fixed",
+            disabled=["Order Number", "Created", "Deadline", "Product", 
+                     "Item Spec", "Item Number", "Quantity", "Image"]
+        )
+        
+        if editor_key in st.session_state and "edited_rows" in st.session_state[editor_key]:
+            edited_rows = st.session_state[editor_key]["edited_rows"]
+            if edited_rows:
+                batch_records = []
+                tag_updates = []
+                
+                for idx_str, changes in edited_rows.items():
+                    idx = int(idx_str)
+                    row = edited_df.iloc[idx]
+                    
+                    # Handle tag changes
+                    if "Tag" in changes:
+                        new_tag = changes["Tag"]
+                        sku = row["Item Number"]
+                        tag_updates.append((sku, new_tag))
+                        
+                        # Update the tag in filtered_df for all rows with same SKU
+                        sku_mask = filtered_df['Item Number'] == sku
+                        filtered_df.loc[sku_mask, 'Tag'] = new_tag
+                        
+                        # Update session state product tags
+                        st.session_state.product_tags[sku] = new_tag
+                    
+                    # Handle other changes (Received, Missing, Note)
+                    if any(field in changes for field in ["Received", "Missing", "Note"]):
+                        received = changes.get("Received", row["Received"])
+                        missing = changes.get("Missing", row["Missing"])
+                        note = changes.get("Note", row["Note"])
+                        
+                        batch_records.append((
+                            str(row["Order Number"]),
+                            str(row["Product"]),
+                            str(row["Item Spec"]),
+                            bool(received),
+                            int(missing) if pd.notna(missing) else 0,
+                            str(note) if pd.notna(note) else ""
+                        ))
+                        
+                        mask = (filtered_df['Order Number'] == row['Order Number']) & \
+                               (filtered_df['Product'] == row['Product']) & \
+                               (filtered_df['Item Spec'] == row['Item Spec'])
+                        filtered_df.loc[mask, 'Received'] = received
+                        filtered_df.loc[mask, 'Missing'] = missing
+                        filtered_df.loc[mask, 'Note'] = note
+                
+                # Save changes to databases
+                success = True
+                try:
+                    # Update product tags
+                    for sku, tag in tag_updates:
+                        db.upsert_product_tag(sku, tag)
+                    
+                    # Update order tracking
+                    if batch_records:
+                        db.batch_upsert_order_tracking(batch_records)
+                    
+                    if tag_updates or batch_records:
+                        st.toast("✅ Changes saved!")
+                        
+                except Exception as e:
+                    success = False
+                    st.error(f"Error saving changes: {str(e)}")
+                
+                if success:
+                    st.session_state[editor_key]["edited_rows"] = {}
+
 @st.fragment
 def orders_table(filtered_df):
     if filtered_df.empty:
         return filtered_df
 
     db = OrderDatabase()
-    product_tags = db.get_product_tags()
-    filtered_df['Tag'] = filtered_df['Item Number'].map(lambda x: product_tags.get(x, ''))
-
-    orders = filtered_df.groupby('Order Number')
-    all_edited_data = []
     
-    for order_num, order_data in orders:
-        all_received = all(order_data['Received'])
-        status_emoji = "✅" if all_received else "⚠️" if any(order_data['Received']) else "❌"
-        
-        with st.expander(f"Order: {order_num} {status_emoji}", expanded=True):
-            column_config = {
-                "Order Number": st.column_config.TextColumn("Order Number", width="small"),
-                "Created": st.column_config.TextColumn("Created", width="small"),
-                "Deadline": st.column_config.TextColumn("Deadline", width="small"),
-                "Product": st.column_config.TextColumn("Product", width="medium"),
-                "Item Spec": st.column_config.TextColumn("Item Spec", width="small"),
-                "Item Number": st.column_config.TextColumn("Item Number", width="small"),
-                "Quantity": st.column_config.NumberColumn("Quantity", width="small"),
-                "Image": st.column_config.ImageColumn("Image", width="small"),
-                "Tag": st.column_config.TextColumn("Tag", width="small"),
-                "Received": st.column_config.CheckboxColumn("Received", width="small", default=False),
-                "Missing": st.column_config.NumberColumn("Missing", width="small", default=0),
-                "Note": st.column_config.TextColumn("Note", width="medium", default="")
-            }
-            
-            product_df = order_data[["Order Number", "Created", "Deadline", "Product", 
-                                   "Item Spec", "Item Number", "Quantity", "Image", 
-                                   "Received", "Missing", "Note", "Tag"]]
-            edited_df = st.data_editor(
-                product_df,
-                column_config=column_config,
-                use_container_width=True,
-                key=f"order_{order_num}",
-                num_rows="fixed",
-                disabled=["Order Number", "Created", "Deadline", "Product", 
-                         "Item Spec", "Item Number", "Quantity", "Image", "Tag"]
-            )
-            
-            if edited_df is not None:
-                all_edited_data.append(edited_df)
+    # Cache product tags
+    if 'product_tags' not in st.session_state:
+        st.session_state.product_tags = db.get_product_tags()
+    
+    if 'Tag' not in filtered_df.columns:
+        filtered_df['Tag'] = filtered_df['Item Number'].map(lambda x: st.session_state.product_tags.get(x, ''))
 
-    if all_edited_data:
-        combined_edits = pd.concat(all_edited_data)
-        filtered_df = filtered_df.copy()
-        for idx, row in combined_edits.iterrows():
-            mask = (filtered_df['Order Number'] == row['Order Number']) & (filtered_df['Product'] == row['Product'])
-            filtered_df.loc[mask, 'Received'] = row['Received'] if pd.notna(row['Received']) else False
-            filtered_df.loc[mask, 'Missing'] = row['Missing'] if pd.notna(row['Missing']) else 0
-            filtered_df.loc[mask, 'Note'] = row['Note'] if pd.notna(row['Note']) else ""
+    # Split into individual order editors
+    orders = filtered_df.groupby('Order Number')
+    for order_num, order_data in orders:
+        order_editor(order_data, order_num, filtered_df, db)
 
     return filtered_df
 
@@ -948,7 +1532,7 @@ def export_controls(df):
             st.success("Data copied to clipboard!")
 
 @st.fragment
-def auth_fragment():
+def auth_fragment(db):  # Add db as a parameter
     """Fragment for handling authentication"""
     if st.session_state.authentication_state != "complete":
         st.info("Please authenticate with your Shopee account to continue.")
@@ -1010,66 +1594,69 @@ def handle_data_editor_changes(edited_df, db):
 
 @st.cache_data(ttl=300)
 def fetch_all_products(access_token, client_id, client_secret, shop_id):
-    """Fetch all products with pagination handling"""
+    """Fetch all products with complete pagination handling"""
     all_items = []
     page_size = 100
     offset = 0
+    has_more = True
     
-    products_response = get_products(
-        access_token=access_token,
-        client_id=client_id,
-        client_secret=client_secret,
-        shop_id=shop_id,
-        offset=offset,
-        page_size=page_size
-    )
-    
-    if not products_response or "response" not in products_response:
-        st.error("Failed to get products response")
-        return []
-        
-    items = products_response["response"].get("item", [])
-    st.write(f"Debug: Found {len(items)} items in first page")
-    
-    if not items:
-        st.warning("No items found in the shop")
-        return []
-    
-    # Get details in smaller batches
-    batch_size = 50# Even smaller batch size
-    for i in range(0, len(items), batch_size):
-        batch_items = items[i:i + batch_size]
-        item_ids = [str(item["item_id"]) for item in batch_items]
-        
-        st.write(f"Debug: Getting details for batch {i//batch_size + 1}, {len(item_ids)} items")
-        time.sleep(1)  # Add more delay between batches
-        
-        try:
-            details_response = get_item_base_info(
+    while has_more:
+        with st.spinner(f"Fetching products (offset: {offset})..."):
+            products_response = get_products(
                 access_token=access_token,
                 client_id=client_id,
                 client_secret=client_secret,
                 shop_id=shop_id,
-                item_ids=item_ids
+                offset=offset,
+                page_size=page_size
             )
             
-            if details_response and "response" in details_response:
-                if "item_list" in details_response["response"]:
-                    batch_items = details_response["response"]["item_list"]
-                    all_items.extend(batch_items)
-                    st.write(f"Debug: Successfully added {len(batch_items)} items")
-                else:
-                    st.write("Debug: No item_list in response:", details_response["response"])
-            else:
-                st.write("Debug: Invalid response structure:", details_response)
-                
-        except Exception as e:
-            st.error(f"Error fetching batch {i//batch_size + 1}: {str(e)}")
-            continue
+            if not products_response or "response" not in products_response:
+                st.error(f"Failed to get products response at offset {offset}")
+                break
             
-        time.sleep(0.5)
+            response_data = products_response["response"]
+            items = response_data.get("item", [])
+            
+            if not items:
+                break
+            
+            # Get details in smaller batches
+            batch_size = 50
+            for i in range(0, len(items), batch_size):
+                batch_items = items[i:i + batch_size]
+                item_ids = [str(item["item_id"]) for item in batch_items]
+                
+                time.sleep(0.5)  # Rate limiting
+                
+                try:
+                    details_response = get_item_base_info(
+                        access_token=access_token,
+                        client_id=client_id,
+                        client_secret=client_secret,
+                        shop_id=shop_id,
+                        item_ids=item_ids
+                    )
+                    
+                    if details_response and "response" in details_response:
+                        if "item_list" in details_response["response"]:
+                            batch_items = details_response["response"]["item_list"]
+                            all_items.extend(batch_items)
+                    
+                except Exception as e:
+                    st.error(f"Error fetching batch at offset {offset}: {str(e)}")
+                    continue
+                
+                time.sleep(0.5)  # Additional rate limiting
+            
+            # Check if there are more items
+            more = response_data.get("has_next_page", False)
+            if more:
+                offset += page_size
+            else:
+                has_more = False
     
-    st.write(f"Debug: Total items collected: {len(all_items)}")
+    st.success(f"Successfully fetched {len(all_items)} products")
     return all_items
 
 def filter_and_paginate_df(df, search_query, page, page_size):
@@ -1117,21 +1704,29 @@ def on_tag_change(edited_rows, current_df, db):
         st.toast("✅ Tags updated!")
 
 @st.fragment
-def products_table(df, db, page_size=50):
+def products_table(df, db):
     """Fragment for displaying products table with pagination"""
     if df is None or df.empty:
         st.info("No products loaded yet.")
         return
 
+    # Calculate pagination
+    page_size = 100
     total_items = len(df)
-    page = st.session_state.product_page
+    total_pages = (total_items + page_size - 1) // page_size
+    current_page = st.session_state.get('product_page', 1)
     
-    # Apply pagination
-    start_idx = (page - 1) * page_size
+    # Ensure current page is valid
+    current_page = max(1, min(current_page, total_pages))
+    
+    # Calculate slice indices
+    start_idx = (current_page - 1) * page_size
     end_idx = min(start_idx + page_size, total_items)
+    
+    # Get current page's data
     page_df = df.iloc[start_idx:end_idx].copy()
     
-    st.write(f"Showing {len(page_df)} of {total_items} products")
+    st.write(f"Showing {start_idx + 1}-{end_idx} of {total_items} products")
     
     # Configure table
     column_config = {
@@ -1144,23 +1739,51 @@ def products_table(df, db, page_size=50):
         "Tag": st.column_config.TextColumn("Tag", width="small")
     }
     
-    # Create unique key for editor
-    editor_key = f"products_editor_{page}"
+    # Display editor with unique key based on current page
+    editor_key = f"products_editor_p{current_page}"
     
-    # Display editor
     edited_df = st.data_editor(
         page_df,
         column_config=column_config,
         use_container_width=True,
         num_rows="fixed",
         disabled=["Image", "Product Name", "SKU", "Stock", "Price", "Status"],
-        key=editor_key,
-        on_change=lambda: on_tag_change(
-            st.session_state[editor_key].get("edited_rows", {}),
-            page_df,
-            db
-        )
+        key=editor_key
     )
+    
+    # Handle any edits
+    if editor_key in st.session_state:
+        edited_rows = st.session_state[editor_key].get("edited_rows", {})
+        if edited_rows:
+            on_tag_change(edited_rows, page_df, db)
+    
+    # Pagination controls
+    col1, col2, col3 = st.columns([2, 3, 2])
+    
+    with col1:
+        if st.button("⬅️ Previous", disabled=current_page == 1):
+            st.session_state.product_page = current_page - 1
+            st.rerun()
+    
+    with col2:
+        page_numbers = []
+        for i in range(max(1, current_page - 2), min(total_pages + 1, current_page + 3)):
+            page_numbers.append(str(i))
+        selected_page = st.select_slider(
+            "Page",
+            options=page_numbers,
+            value=str(current_page),
+            key=f"page_slider_{current_page}",
+            label_visibility="collapsed"
+        )
+        if str(current_page) != selected_page:
+            st.session_state.product_page = int(selected_page)
+            st.rerun()
+    
+    with col3:
+        if st.button("Next ➡️", disabled=current_page >= total_pages):
+            st.session_state.product_page = current_page + 1
+            st.rerun()
 
 @st.fragment
 def pagination_controls(total_items, page_size):
@@ -1185,12 +1808,18 @@ def pagination_controls(total_items, page_size):
 def products_page():
     """Products page with improved state management"""
     st.title("📦 Products")
+
+    # Only proceed if this is the active tab
+    if st.session_state.active_tab != "Products":
+        return
     
     # Initialize state
     if "all_products_df" not in st.session_state:
         st.session_state.all_products_df = None
     if "product_page" not in st.session_state:
         st.session_state.product_page = 1
+    
+
     
     db = OrderDatabase()
     token = db.load_token()
@@ -1200,15 +1829,18 @@ def products_page():
         return
     
     # Search input
-    search = st.text_input(
-        "🔍 Search products by name or SKU",
-        key="search_input"
-    )
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        search = st.text_input(
+            "🔍 Search products by name or SKU",
+            key="product_search"
+        )
     
-    # Reset button
-    if st.button("🔄 Reset Product List"):
-        st.session_state.all_products_df = None
-        st.rerun()
+    with col2:
+        if st.button("🔄 Reset Product List", use_container_width=True):
+            st.session_state.all_products_df = None
+            st.session_state.product_page = 1
+            st.rerun()
     
     # Fetch products if needed
     if st.session_state.all_products_df is None:
@@ -1219,7 +1851,9 @@ def products_page():
                 CLIENT_SECRET,
                 SHOP_ID
             )
+            
             if items:
+                # Process items into DataFrame
                 table_data = []
                 for item in items:
                     try:
@@ -1239,19 +1873,19 @@ def products_page():
                             "Product Name": item.get("item_name", ""),
                             "SKU": item.get("item_sku", ""),
                             "Stock": stock_info,
-                            "Price": price_info.get("current_price", 0),
+                            "Price": price_info.get("current_price", 0) / 100000,
                             "Status": item.get("item_status", ""),
-                            "Tag": ""  # Initialize empty tag
+                            "Tag": ""
                         })
                     except Exception as e:
                         st.error(f"Error processing item: {str(e)}")
                 
                 if table_data:
-                    # Create DataFrame and load initial tags
-                    st.session_state.all_products_df = pd.DataFrame(table_data)
+                    df = pd.DataFrame(table_data)
+                    # Load tags from database
                     tags = db.get_product_tags()
-                    st.session_state.all_products_df['Tag'] = \
-                        st.session_state.all_products_df['SKU'].map(lambda x: tags.get(x, ""))
+                    df['Tag'] = df['SKU'].map(lambda x: tags.get(x, ""))
+                    st.session_state.all_products_df = df
     
     # Filter and display products
     if st.session_state.all_products_df is not None:
@@ -1265,25 +1899,8 @@ def products_page():
                 df['SKU'].str.lower().str.contains(search, na=False)
             ]
         
-        # Use fragments for table display
+        # Display table with pagination
         products_table(df, db)
-        
-        if len(df) > 0:
-            # Pagination controls
-            total_pages = (len(df) + 49) // 50
-            cols = st.columns(5)
-            with cols[1]:
-                if st.button("⬅️ Previous", disabled=st.session_state.product_page==1):
-                    st.session_state.product_page = max(1, st.session_state.product_page - 1)
-                    st.rerun(scope="fragment")
-            
-            with cols[2]:
-                st.write(f"Page {st.session_state.product_page} of {total_pages}")
-            
-            with cols[3]:
-                if st.button("Next ➡️", disabled=st.session_state.product_page >= total_pages):
-                    st.session_state.product_page = min(total_pages, st.session_state.product_page + 1)
-                    st.rerun(scope="fragment")
 
 
 def main():
@@ -1301,7 +1918,7 @@ def main():
     st.title("📦 Order Management")
     
     # Handle authentication using fragment
-    if not auth_fragment():
+    if not auth_fragment(db):
         return
 
     # Check token validity
@@ -1314,34 +1931,38 @@ def main():
     # Use sidebar fragment within sidebar context
     with st.sidebar:
         sidebar_controls()
-
-    tab1, tab2 = st.tabs(["Orders", "Products"])
     
-    with tab1:
-        # Fetch and process orders if needed
-        if st.session_state.orders_need_refresh:
-            st.session_state.orders_df = fetch_and_process_orders(token, db)
-            st.session_state.orders_need_refresh = False
+    tabs = st.tabs(["Orders", "Products"])
 
-        if not st.session_state.orders_df.empty:
-            # Apply filters based on session state
-            filtered_df = apply_filters(
-                st.session_state.orders_df, 
-                st.session_state.get('status_filter', 'All'),
-                st.session_state.get('show_preorders', False)
-            )
-            
-            # Use fragments for main UI components
-            edited_df = orders_table(filtered_df)
-            statistics_view(edited_df)
-            
-            st.divider()
-            export_controls(edited_df)
-        else:
-            st.info("No orders found in the selected time range.")
+    active_tab = st.radio("Tabs", ["Orders", "Products"], label_visibility="hidden")
+    st.session_state.active_tab = active_tab
     
-    with tab2:
-        products_page()
+    with tabs[0]:
+        if active_tab == "Orders":
+            if st.session_state.orders_need_refresh:
+                st.session_state.orders_df = fetch_and_process_orders(token, db)
+                st.session_state.orders_need_refresh = False
+
+            if not st.session_state.orders_df.empty:
+                filtered_df = apply_filters(
+                    st.session_state.orders_df, 
+                    st.session_state.get('status_filter', 'All'),
+                    st.session_state.get('show_preorders', False)
+                )
+                
+                edited_df = orders_table(filtered_df)
+                statistics_view(edited_df)
+                
+                st.divider()
+                export_controls(edited_df)
+            else:
+                st.info("No orders found in the selected time range.")
+    
+    # Products tab
+    with tabs[1]:
+        if active_tab == "Products":
+            products_page()
+        
 
 if __name__ == "__main__":
     main()
