@@ -855,6 +855,7 @@ def get_shipping_parameter(access_token, client_id, client_secret, shop_id, orde
 
 def get_shipping_parameter(access_token, client_id, client_secret, shop_id, order_sn):
     """Get shipping parameters from Shopee API"""
+
     timestamp = int(time.time())
     
     # URL parameters
@@ -880,13 +881,11 @@ def get_shipping_parameter(access_token, client_id, client_secret, shop_id, orde
     params['sign'] = sign
     url = f"https://partner.shopeemobile.com{path}"
     
-    st.write("DEBUG - API URL:", url)
-    st.write("DEBUG - API Params:", params)
+    st.write("DEBUG - Getting shipping parameters")
     
     try:
         response = requests.get(url, params=params)
         st.write("DEBUG - Response Status:", response.status_code)
-        st.write("DEBUG - Response Headers:", dict(response.headers))
         
         response_data = response.json()
         st.write("DEBUG - Full Response:", response_data)
@@ -910,7 +909,7 @@ def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
     """Ship an order using Shopee API"""
     timestamp = int(time.time())
     
-    # First get shipping parameters
+    # Get shipping parameters
     params_response = get_shipping_parameter(
         access_token=access_token,
         client_id=client_id,
@@ -926,19 +925,24 @@ def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
     response_data = params_response.get("response", {})
     info_needed = response_data.get("info_needed", {})
     
-    # Build shipping request
+    # Build shipping request with basic info
     shipping_request = {
         "order_sn": order_sn
     }
     
-    # Handle dropoff requirements
-    if "dropoff" in info_needed:
-        dropoff_needs = info_needed["dropoff"]
-        if "sender_real_name" in dropoff_needs:
-            shipping_request["sender_real_name"] = "李先生"  # Add sender name at root level
-
-    print("Shipping request:", json.dumps(shipping_request, indent=2))
+    # If dropoff method with sender_real_name is needed
+    if "dropoff" in info_needed and "sender_real_name" in info_needed["dropoff"]:
+        # Get sender_real_name from the main response
+        sender_name = response_data.get("dropoff", {}).get("sender_real_name")
+        if not sender_name:
+            st.error("Sender name required but not provided in API response")
+            return None
             
+        shipping_request["dropoff"] = {"sender_real_name": sender_name}
+        st.write("DEBUG - Using sender name from API:", sender_name)
+
+    st.write("DEBUG - Final shipping request:", shipping_request)
+
     # Make shipping request
     params = {
         'partner_id': client_id,
@@ -964,13 +968,18 @@ def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
     try:
         response = requests.post(url, params=params, json=shipping_request)
         response_data = response.json()
-        print("Shipping response:", json.dumps(response_data, indent=2))
+        st.write("DEBUG - Shipping response:", response_data)
         
-        if response.status_code == 200 and "error" not in response_data:
-            return response_data
+        if response.status_code == 200:
+            if "error" not in response_data or not response_data.get("error"):
+                return response_data
+            else:
+                error_msg = response_data.get("message", "Unknown error")
+                error_code = response_data.get("error", "")
+                st.error(f"Shopee API Error: {error_msg} (Code: {error_code})")
+                return None
         else:
-            st.error(f"Shopee API Error: {response_data.get('message', 'Unknown error')} "
-                    f"(Code: {response_data.get('error', 'Unknown error')})")
+            st.error(f"HTTP Error {response.status_code}: {response.text}")
             return None
     except Exception as e:
         st.error(f"Error shipping order: {str(e)}")
