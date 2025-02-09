@@ -1128,14 +1128,9 @@ def order_editor(order_data, order_num, filtered_df, db):
         # Add shipping controls
         col1, col2 = st.columns([3, 1])
         with col2:
-            ship_button = st.button("出貨 🚚", key=f"ship_{order_num}")
-            if ship_button:
-                with st.spinner("Shipping order..."):
-                    token = check_token_validity(db)
-                    if not token:
-                        st.error("Authentication token is invalid. Please re-authenticate.")
-                        return
-                        
+            if st.button("出貨 🚚", key=f"ship_{order_num}"):
+                token = check_token_validity(db)
+                if token:
                     # Ship the order
                     st.info("Step 1/3: Shipping order...")
                     shipping_response = ship_order(
@@ -1145,11 +1140,27 @@ def order_editor(order_data, order_num, filtered_df, db):
                         shop_id=SHOP_ID,
                         order_sn=order_num
                     )
+                else:
+                    st.error("Invalid token. Please re-authenticate.")
+
+        with col3:
+            if st.button("列印 🖨️", key=f"print_{order_num}"):
+                token = check_token_validity(db)
+                if token:
+                    # Create shipping document
+                    st.info("Creating shipping document...")
+                    doc_response = create_shipping_document(
+                        access_token=token["access_token"],
+                        client_id=CLIENT_ID,
+                        client_secret=CLIENT_SECRET,
+                        shop_id=SHOP_ID,
+                        order_sn=order_num
+                    )
                     
-                    if shipping_response and "error" not in shipping_response:
-                        st.info("Step 2/3: Creating shipping document...")
-                        # Create shipping document
-                        doc_response = create_shipping_document(
+                    if doc_response and ("error" not in doc_response or doc_response.get("error") == ""):
+                        # Download shipping document
+                        st.info("Downloading shipping document...")
+                        download_response = download_shipping_document(
                             access_token=token["access_token"],
                             client_id=CLIENT_ID,
                             client_secret=CLIENT_SECRET,
@@ -1157,38 +1168,25 @@ def order_editor(order_data, order_num, filtered_df, db):
                             order_sn=order_num
                         )
                         
-                        if doc_response and doc_response.get("response", {}).get("success"):
-                            st.info("Step 3/3: Downloading shipping document...")
-                            # Download shipping document
-                            download_response = download_shipping_document(
-                                access_token=token["access_token"],
-                                client_id=CLIENT_ID,
-                                client_secret=CLIENT_SECRET,
-                                shop_id=SHOP_ID,
-                                order_sn=order_num
-                            )
-                            
-                            if download_response and "response" in download_response:
-                                doc_url = download_response["response"].get("shipping_document_url")
-                                if doc_url:
-                                    # Open shipping document in new tab
-                                    js = f"""
-                                    <script>
-                                    window.open('{doc_url}', '_blank');
-                                    </script>
-                                    """
-                                    st.components.v1.html(js)
-                                    st.success("Order shipped successfully! Shipping document opened in new tab.")
-                                else:
-                                    st.error("Failed to get shipping document URL")
+                        if download_response and "response" in download_response:
+                            doc_url = download_response["response"].get("shipping_document_url")
+                            if doc_url:
+                                # Open shipping document in new tab
+                                js = f"""
+                                <script>
+                                window.open('{doc_url}', '_blank');
+                                </script>
+                                """
+                                st.components.v1.html(js)
+                                st.success("Shipping document opened in new tab!")
                             else:
-                                st.error("Failed to download shipping document")
+                                st.error("No shipping document URL found")
                         else:
-                            st.error("Failed to create shipping document")
+                            st.error("Failed to download shipping document")
                     else:
-                        error_msg = shipping_response.get("message", "Unknown error") if shipping_response else "No response"
-                        error_code = shipping_response.get("error", "") if shipping_response else "Unknown error"
-                        st.error(f"Failed to ship order: {error_msg} (Error code: {error_code})")
+                        st.error("Failed to create shipping document")
+                else:
+                    st.error("Invalid token. Please re-authenticate.")
 
         editor_key = f"order_{order_num}"
         
