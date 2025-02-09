@@ -856,7 +856,6 @@ def get_shipping_parameter(access_token, client_id, client_secret, shop_id, orde
 def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
     """Ship an order using Shopee API"""
     
-    
     # First get shipping parameters
     shipping_params = get_shipping_parameter(
         access_token=access_token,
@@ -872,12 +871,17 @@ def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
         
     print("Shipping parameters response:", json.dumps(shipping_params, indent=2))
     response_data = shipping_params.get("response", {})
-    
+    info_needed = response_data.get("info_needed", [])
+
     # Initialize shipping request body
     body = {
         "order_sn": order_sn,
         "package_number": ""
     }
+
+    # If sender_real_name is needed, get it from the dropoff info
+    if "sender_real_name" in info_needed:
+        body["sender_real_name"] = response_data.get("dropoff", {}).get("sender_real_name", "")
     
     # Handle pickup if needed
     pickup_info = response_data.get("pickup", {})
