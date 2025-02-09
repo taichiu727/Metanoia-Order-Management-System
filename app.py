@@ -855,6 +855,7 @@ def get_shipping_parameter(access_token, client_id, client_secret, shop_id, orde
 
 def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
     """Ship an order using Shopee API"""
+    import json
     
     # First get shipping parameters
     shipping_params = get_shipping_parameter(
@@ -869,9 +870,13 @@ def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
         st.error("Failed to get shipping parameters")
         return None
         
-    print("Shipping parameters response:", json.dumps(shipping_params, indent=2))
+    st.write("DEBUG - Shipping parameters response:", shipping_params)  # Debug print to Streamlit
+    print("DEBUG - Full shipping parameters:", json.dumps(shipping_params, indent=2))  # Debug print to console
+    
     response_data = shipping_params.get("response", {})
     info_needed = response_data.get("info_needed", [])
+    
+    st.write("DEBUG - Info needed:", info_needed)  # Debug print to Streamlit
 
     # Initialize shipping request body
     body = {
@@ -881,7 +886,9 @@ def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
 
     # If sender_real_name is needed, get it from the dropoff info
     if "sender_real_name" in info_needed:
-        body["sender_real_name"] = response_data.get("dropoff", {}).get("sender_real_name", "")
+        sender_name = response_data.get("dropoff", {}).get("sender_real_name", "")
+        st.write("DEBUG - Found sender name:", sender_name)  # Debug print to Streamlit
+        body["sender_real_name"] = sender_name
     
     # Handle pickup if needed
     pickup_info = response_data.get("pickup", {})
