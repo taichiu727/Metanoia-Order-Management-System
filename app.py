@@ -809,7 +809,7 @@ def update_orders_df(original_df, edited_df):
 
 def get_shipping_parameter(access_token, client_id, client_secret, shop_id, order_sn):
     """Get shipping parameters from Shopee API"""
-
+ 
     timestamp = int(time.time())
     
     params = {
@@ -917,7 +917,49 @@ def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
         st.write("DEBUG - Shipping response:", response_data)
         
         if response.status_code == 200:
-            if "error" not in response_data or not response_data.get("error"):
+            # Success if error is empty or not present
+            if "error" not in response_data or response_data.get("error") == "":
+                st.success("Order shipped successfully!")
+                
+                # Create shipping document
+                st.info("Creating shipping document...")
+                doc_response = create_shipping_document(
+                    access_token=access_token,
+                    client_id=client_id,
+                    client_secret=client_secret,
+                    shop_id=shop_id,
+                    order_sn=order_sn
+                )
+                
+                if doc_response and ("error" not in doc_response or doc_response.get("error") == ""):
+                    # Download shipping document
+                    st.info("Downloading shipping document...")
+                    download_response = download_shipping_document(
+                        access_token=access_token,
+                        client_id=client_id,
+                        client_secret=client_secret,
+                        shop_id=shop_id,
+                        order_sn=order_sn
+                    )
+                    
+                    if download_response and "response" in download_response:
+                        doc_url = download_response["response"].get("shipping_document_url")
+                        if doc_url:
+                            # Open shipping document in new tab
+                            js = f"""
+                            <script>
+                            window.open('{doc_url}', '_blank');
+                            </script>
+                            """
+                            st.components.v1.html(js)
+                            st.success("Shipping document opened in new tab!")
+                        else:
+                            st.error("No shipping document URL found")
+                    else:
+                        st.error("Failed to download shipping document")
+                else:
+                    st.error("Failed to create shipping document")
+                    
                 return response_data
             else:
                 error_msg = response_data.get("message", "Unknown error")
@@ -931,7 +973,53 @@ def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
         st.error(f"Error shipping order: {str(e)}")
         return None
 
+def create_shipping_document(access_token, client_id, client_secret, shop_id, order_sn):
+    """Create shipping document using Shopee API"""
+    timestamp = int(time.time())
+    
+    body = {
+        'order_list': [{'order_sn': order_sn}]
+    }
+    
+    params = {
+        'partner_id': client_id,
+        'timestamp': timestamp,
+        'access_token': access_token,
+        'shop_id': shop_id
+    }
 
+    path = "/api/v2/logistics/create_shipping_document"
+    sign = generate_api_signature(
+        api_type='shop',
+        partner_id=client_id,
+        path=path,
+        timestamp=timestamp,
+        access_token=access_token,
+        shop_id=shop_id,
+        client_secret=client_secret
+    )
+
+    params['sign'] = sign
+    url = f"https://partner.shopeemobile.com{path}"
+    
+    try:
+        response = requests.post(url, params=params, json=body)
+        response_data = response.json()
+        
+        if response.status_code == 200:
+            if "error" not in response_data or not response_data.get("error"):
+                return response_data
+            else:
+                error_msg = response_data.get("message", "Unknown error")
+                error_code = response_data.get("error", "")
+                st.error(f"Error creating shipping document: {error_msg} (Code: {error_code})")
+                return None
+        else:
+            st.error(f"Error creating shipping document: {response.text}")
+            return None
+    except Exception as e:
+        st.error(f"Error creating shipping document: {str(e)}")
+        return None
 
 def download_shipping_document(access_token, client_id, client_secret, shop_id, order_sn):
     """Download shipping document using Shopee API"""
@@ -967,12 +1055,12 @@ def download_shipping_document(access_token, client_id, client_secret, shop_id, 
         response_data = response.json()
         
         if response.status_code == 200:
-            if "error" not in response_data or response_data.get("error", "") == "":
+            if "error" not in response_data or not response_data.get("error"):
                 return response_data
             else:
                 error_msg = response_data.get("message", "Unknown error")
                 error_code = response_data.get("error", "")
-                st.error(f"Shopee API Error: {error_msg} (Code: {error_code})")
+                st.error(f"Error downloading shipping document: {error_msg} (Code: {error_code})")
                 return None
         else:
             st.error(f"Error downloading shipping document: {response.text}")
