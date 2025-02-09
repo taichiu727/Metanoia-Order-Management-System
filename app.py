@@ -1261,18 +1261,22 @@ def order_editor(order_data, order_num, filtered_df, db):
                         
                         if download_response and "response" in download_response:
                             if "html_content" in download_response["response"]:
-                                # Render the HTML form directly
-                                st.components.v1.html(download_response["response"]["html_content"], height=0)
-                                st.success("Opening shipping document...")
+                                html_content = download_response["response"]["html_content"]
+                                # Add auto-submit script
+                                html_content = html_content.replace(
+                                    '</form>',
+                                    '</form><script>window.onload = function() { document.getElementById("form").submit(); };</script>'
+                                )
+                                # Render in iframe
+                                st.components.v1.iframe(srcdoc=html_content, height=0, scrolling=True)
+                                st.success("Shipping document should open automatically")
                             else:
                                 doc_url = download_response["response"].get("shipping_document_url")
                                 if doc_url:
-                                    js = f"""
-                                    <script>
-                                    window.open('{doc_url}', '_blank');
-                                    </script>
-                                    """
-                                    st.components.v1.html(js)
+                                    st.components.v1.html(
+                                        f'<script>window.open("{doc_url}", "_blank");</script>',
+                                        height=0
+                                    )
                                     st.success("Shipping document opened in new tab!")
                                 else:
                                     st.error("No shipping document URL found")
