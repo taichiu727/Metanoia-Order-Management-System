@@ -1283,13 +1283,28 @@ def order_editor(order_data, order_num, filtered_df, db):
                                 st.success("Shipping document should open automatically")
                             elif response_type == "pdf":
                                 pdf_data = download_response["response"]["content"]
-                                st.download_button(
-                                    "Download PDF",
-                                    pdf_data,
-                                    file_name=f"shipping_label_{order_num}.pdf",
-                                    mime="application/pdf"
-                                )
-                                st.success("PDF ready for download")
+                                
+                                # Create HTML to open PDF in new tab
+                                html_content = f"""
+                                <html>
+                                <body>
+                                <script>
+                                    var pdfData = "{pdf_data}";
+                                    var byteCharacters = atob(pdfData);
+                                    var byteNumbers = new Array(byteCharacters.length);
+                                    for (var i = 0; i < byteCharacters.length; i++) {{
+                                        byteNumbers[i] = byteCharacters.charCodeAt(i);
+                                    }}
+                                    var byteArray = new Uint8Array(byteNumbers);
+                                    var file = new Blob([byteArray], {{ type: 'application/pdf' }});
+                                    var fileURL = URL.createObjectURL(file);
+                                    window.open(fileURL, '_blank');
+                                </script>
+                                </body>
+                                </html>
+                                """
+                                st.components.v1.html(html_content, height=0)
+                                st.success("PDF should open in new tab")
                             else:
                                 doc_url = download_response["response"].get("shipping_document_url")
                                 if doc_url:
