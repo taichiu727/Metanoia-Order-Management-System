@@ -1111,17 +1111,21 @@ def download_shipping_document(access_token, client_id, client_secret, shop_id, 
             st.error(f"HTTP Error {response.status_code}: {response.text}")
             return None
             
+        content_type = response.headers.get('content-type', '')
+        if 'text/html' in content_type:
+            # Direct HTML response containing the form
+            return {
+                "response": {
+                    "shipping_document_url": response.url,
+                    "html_content": response.text
+                }
+            }
+            
         try:
-            response_data = response.json()
-        except ValueError as e:
-            st.error(f"Invalid JSON response: {response.text}")
+            return response.json()
+        except ValueError:
+            st.error(f"Invalid response format: {response.text[:200]}...")
             return None
-            
-        if "error" in response_data and response_data["error"]:
-            st.error(f"API Error: {response_data.get('message', 'Unknown error')}")
-            return None
-            
-        return response_data
             
     except Exception as e:
         st.error(f"Error downloading shipping document: {str(e)}")
@@ -1256,18 +1260,22 @@ def order_editor(order_data, order_num, filtered_df, db):
                         )
                         
                         if download_response and "response" in download_response:
-                            doc_url = download_response["response"].get("shipping_document_url")
-                            if doc_url:
-                                # Open shipping document in new tab
-                                js = f"""
-                                <script>
-                                window.open('{doc_url}', '_blank');
-                                </script>
-                                """
-                                st.components.v1.html(js)
-                                st.success("Shipping document opened in new tab!")
+                            if "html_content" in download_response["response"]:
+                                # Render the HTML form directly
+                                st.components.v1.html(download_response["response"]["html_content"], height=0)
+                                st.success("Opening shipping document...")
                             else:
-                                st.error("No shipping document URL found")
+                                doc_url = download_response["response"].get("shipping_document_url")
+                                if doc_url:
+                                    js = f"""
+                                    <script>
+                                    window.open('{doc_url}', '_blank');
+                                    </script>
+                                    """
+                                    st.components.v1.html(js)
+                                    st.success("Shipping document opened in new tab!")
+                                else:
+                                    st.error("No shipping document URL found")
                         else:
                             st.error("Failed to download shipping document")
                     else:
