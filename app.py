@@ -807,6 +807,58 @@ def update_orders_df(original_df, edited_df):
     # Reorder columns to match original order
     return updated_df[column_order]
 
+def get_shipping_parameter(access_token, client_id, client_secret, shop_id, order_sn):
+    """Get shipping parameters from Shopee API"""
+
+    timestamp = int(time.time())
+    
+    # URL parameters
+    params = {
+        'partner_id': client_id,
+        'timestamp': timestamp,
+        'access_token': access_token,
+        'shop_id': shop_id,
+        'order_sn': order_sn
+    }
+
+    path = "/api/v2/logistics/get_shipping_parameter"
+    sign = generate_api_signature(
+        api_type='shop',
+        partner_id=client_id,
+        path=path,
+        timestamp=timestamp,
+        access_token=access_token,
+        shop_id=shop_id,
+        client_secret=client_secret
+    )
+
+    params['sign'] = sign
+    url = f"https://partner.shopeemobile.com{path}"
+    
+    st.write("DEBUG - Getting shipping parameters")
+    
+    try:
+        response = requests.get(url, params=params)
+        st.write("DEBUG - Response Status:", response.status_code)
+        
+        response_data = response.json()
+        st.write("DEBUG - Full Response:", response_data)
+        
+        if response.status_code == 200:
+            if "error" not in response_data or not response_data.get("error"):
+                return response_data
+            else:
+                error_msg = response_data.get("message", "Unknown error")
+                error_code = response_data.get("error", "")
+                st.error(f"API Error: {error_msg} (Code: {error_code})")
+                return None
+        else:
+            st.error(f"HTTP Error {response.status_code}: {response.text}")
+            return None
+    except Exception as e:
+        st.error(f"Error getting shipping parameters: {str(e)}")
+        return None
+
 def get_order_detail(access_token, client_id, client_secret, shop_id, order_sn):
     """Get order details including recipient name"""
     timestamp = int(time.time())
@@ -845,7 +897,7 @@ def get_order_detail(access_token, client_id, client_secret, shop_id, order_sn):
 
 def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
     """Ship an order using Shopee API"""
-    import json
+
     timestamp = int(time.time())
     
     # First get order details to get recipient name
