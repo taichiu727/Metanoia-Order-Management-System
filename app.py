@@ -1126,7 +1126,7 @@ def order_editor(order_data, order_num, filtered_df, db):
     
     with st.expander(f"Order: {order_num} {status_emoji}", expanded=True):
         # Add shipping controls
-        col1, col2 = st.columns([3, 1])
+        col1, col2, col3 = st.columns([2, 1, 1])
         with col2:
             if st.button("出貨 🚚", key=f"ship_{order_num}"):
                 token = check_token_validity(db)
