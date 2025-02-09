@@ -867,6 +867,10 @@ def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
         st.error("Failed to get shipping parameters")
         return None
         
+    # Log shipping parameters for debugging
+    print("Shipping parameters response:", json.dumps(shipping_params, indent=2))
+    info_needed = shipping_params["response"].get("info_needed", [])
+        
     # Initialize shipping request body based on info_needed
     info_needed = shipping_params["response"].get("info_needed", [])
     body = {
@@ -886,6 +890,10 @@ def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
             }
             if time_slot_list:
                 body["pickup"]["pickup_time_id"] = time_slot_list[0].get("id", "")  # Use first available time slot
+    
+    # Check what info is needed from the response
+    if "sender_real_name" in info_needed:
+        body["sender_real_name"] = st.session_state.sender_name
     
     # Add dropoff info if needed
     if "dropoff" in info_needed:
