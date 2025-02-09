@@ -1074,7 +1074,10 @@ def download_shipping_document(access_token, client_id, client_secret, shop_id, 
     timestamp = int(time.time())
     
     body = {
-        'order_list': [{'order_sn': order_sn}]
+        'order_list': [{
+            'order_sn': order_sn,
+        }],
+        'shop_id': shop_id
     }
     
     params = {
@@ -1099,20 +1102,27 @@ def download_shipping_document(access_token, client_id, client_secret, shop_id, 
     url = f"https://partner.shopeemobile.com{path}"
     
     try:
-        response = requests.post(url, params=params, json=body)
-        response_data = response.json()
+        headers = {
+            'Content-Type': 'application/json'
+        }
+        response = requests.post(url, params=params, json=body, headers=headers)
         
-        if response.status_code == 200:
-            if "error" not in response_data or not response_data.get("error"):
-                return response_data
-            else:
-                error_msg = response_data.get("message", "Unknown error")
-                error_code = response_data.get("error", "")
-                st.error(f"Error downloading shipping document: {error_msg} (Code: {error_code})")
-                return None
-        else:
-            st.error(f"Error downloading shipping document: {response.text}")
+        if response.status_code != 200:
+            st.error(f"HTTP Error {response.status_code}: {response.text}")
             return None
+            
+        try:
+            response_data = response.json()
+        except ValueError as e:
+            st.error(f"Invalid JSON response: {response.text}")
+            return None
+            
+        if "error" in response_data and response_data["error"]:
+            st.error(f"API Error: {response_data.get('message', 'Unknown error')}")
+            return None
+            
+        return response_data
+            
     except Exception as e:
         st.error(f"Error downloading shipping document: {str(e)}")
         return None
