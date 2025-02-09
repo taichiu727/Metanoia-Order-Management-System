@@ -855,7 +855,7 @@ def get_shipping_parameter(access_token, client_id, client_secret, shop_id, orde
 
 def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
     """Ship an order using Shopee API"""
-    import json
+    
     
     # First get shipping parameters
     shipping_params = get_shipping_parameter(
