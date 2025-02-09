@@ -977,8 +977,10 @@ def create_shipping_document(access_token, client_id, client_secret, shop_id, or
     """Create shipping document using Shopee API"""
     timestamp = int(time.time())
     
+    # Request body
     body = {
-        'order_list': [{'order_sn': order_sn}]
+        'order_sn': order_sn,  # Changed from order_list to single order_sn
+        'shop_id': shop_id,    # Added shop_id to body
     }
     
     params = {
@@ -1002,9 +1004,12 @@ def create_shipping_document(access_token, client_id, client_secret, shop_id, or
     params['sign'] = sign
     url = f"https://partner.shopeemobile.com{path}"
     
+    st.write("DEBUG - Create Document Request:", body)
+    
     try:
         response = requests.post(url, params=params, json=body)
         response_data = response.json()
+        st.write("DEBUG - Create Document Response:", response_data)
         
         if response.status_code == 200:
             if "error" not in response_data or not response_data.get("error"):
