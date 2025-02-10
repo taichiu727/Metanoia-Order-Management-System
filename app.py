@@ -16,6 +16,9 @@ from datetime import datetime, timedelta
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import json
+from PIL import Image
+from io import BytesIO
+import base64
 
 # Database Configuration
 DATABASE_URL = "postgresql://neondb_owner:npg_r9iSFwQd4zAT@ep-white-sky-a1mrgmyd-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require"
@@ -122,6 +125,15 @@ class OrderDatabase:
                 CREATE TABLE IF NOT EXISTS product_tags (
                     item_sku VARCHAR(100),
                     tag_name TEXT,
+                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (item_sku)
+                )
+            """)
+             # Add product_images table
+            self.cursor.execute("""
+                CREATE TABLE IF NOT EXISTS product_images (
+                    item_sku VARCHAR(100),
+                    image_data TEXT,
                     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (item_sku)
                 )
@@ -270,7 +282,62 @@ class OrderDatabase:
             return {row['item_sku']: row['tag_name'] for row in self.cursor.fetchall()}
         finally:
             self.close()
+    def save_product_image(self, item_sku, image_data):
+        """Save a product reference image to the database"""
+        try:
+            self.connect()
+            self.cursor.execute("""
+                INSERT INTO product_images (item_sku, image_data, last_updated)
+                VALUES (%s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT (item_sku) 
+                DO UPDATE SET 
+                    image_data = EXCLUDED.image_data,
+                    last_updated = CURRENT_TIMESTAMP
+            """, (item_sku, image_data))
+            self.conn.commit()
+        finally:
+            self.close()
+    
+    def get_product_images(self):
+        """Get all product reference images from the database"""
+        try:
+            self.connect()
+            self.cursor.execute("SELECT item_sku, image_data FROM product_images")
+            return {row['item_sku']: row['image_data'] for row in self.cursor.fetchall()}
+        finally:
+            self.close()
 
+def process_image(uploaded_file):
+    """Process and compress uploaded images"""
+    try:
+        # Read the uploaded file
+        image = Image.open(uploaded_file)
+        
+        # Convert to RGB if necessary
+        if image.mode in ('RGBA', 'P'):
+            image = image.convert('RGB')
+        
+        # Calculate new dimensions while maintaining aspect ratio
+        max_size = 800
+        ratio = min(max_size/image.width, max_size/image.height)
+        new_size = (int(image.width * ratio), int(image.height * ratio))
+        
+        # Resize image
+        image = image.resize(new_size, Image.Resampling.LANCZOS)
+        
+        # Save to bytes with compression
+        buffer = BytesIO()
+        image.save(buffer, format='JPEG', quality=80, optimize=True)
+        compressed_data = buffer.getvalue()
+        
+        # Check final size
+        if len(compressed_data) > 500 * 1024:  # 500KB
+            raise ValueError("Compressed image still exceeds 500KB limit")
+            
+        return base64.b64encode(compressed_data).decode('utf-8')
+    except Exception as e:
+        st.error(f"Error processing image: {str(e)}")
+        return None
 
 def get_products(access_token, client_id, client_secret, shop_id, offset=0, page_size=50, search_keyword=""):
     """Fetch products from Shopee API"""
@@ -683,6 +750,9 @@ def fetch_and_process_orders(token, db):
         order_details_list.sort(key=lambda x: x['create_time'], reverse=True)
         st.session_state.order_details = order_details_list
 
+         # Load reference images
+        reference_images = db.get_product_images()
+
         # Process orders into DataFrame with item_spec in the tracking key
         tracking_data = {
             (item['order_sn'], item['product_name'], item['item_spec']): item 
@@ -704,6 +774,7 @@ def fetch_and_process_orders(token, db):
                         "Product": item["item_name"],
                         "Quantity": item["model_quantity_purchased"],
                         "Image": item["image_info"]["image_url"],
+                        "Reference Image": reference_images.get(item["item_sku"], ""),
                         "Item Spec": item["model_name"],
                         "Item Number": item["item_sku"],
                         "Received": tracking['received'],
@@ -1125,6 +1196,7 @@ def download_shipping_document(access_token, client_id, client_secret, shop_id, 
         st.error(f"Error downloading shipping document: {str(e)}")
         return None
 
+
 @st.fragment
 def sidebar_controls():
     """Fragment for sidebar controls"""
@@ -1169,6 +1241,11 @@ def get_column_config():
         "Item Number": st.column_config.TextColumn("Item Number", width="small"),
         "Quantity": st.column_config.NumberColumn("Quantity", width="small"),
         "Image": st.column_config.ImageColumn("Image", width="small"),
+        "Reference Image": st.column_config.ImageColumn(
+            "Reference Image",
+            width="small",
+            help="Upload a reference image of the actual product (max 800x800px, 500KB)"
+        ),
         "Tag": st.column_config.TextColumn("Tag", width="small", required=False),
         "Received": st.column_config.CheckboxColumn("Received", width="small", default=False),
         "Missing": st.column_config.NumberColumn("Missing", width="small", default=0),
@@ -1179,6 +1256,9 @@ def get_column_config():
 def order_editor(order_data, order_num, filtered_df, db):
     all_received = all(order_data['Received'])
     status_emoji = "✅" if all_received else "⚠️" if any(order_data['Received']) else "❌"
+
+    if 'reference_images' not in st.session_state:
+        st.session_state.reference_images = db.get_product_images()
     
     with st.expander(f"Order: {order_num} {status_emoji}", expanded=True):
         # Add shipping controls
@@ -1404,7 +1484,7 @@ def order_editor(order_data, order_num, filtered_df, db):
         
         display_data = order_data[["Order Number", "Created", "Deadline", "Product", 
                                 "Item Spec", "Item Number", "Quantity", "Image", 
-                                "Received", "Missing", "Note", "Tag"]]
+                                "Reference Image", "Received", "Missing", "Note", "Tag"]]
         
         edited_df = st.data_editor(
             display_data,
@@ -1425,6 +1505,18 @@ def order_editor(order_data, order_num, filtered_df, db):
                 for idx_str, changes in edited_rows.items():
                     idx = int(idx_str)
                     row = edited_df.iloc[idx]
+                    
+                    # Handle reference image updates
+                    if "Reference Image" in changes:
+                        sku = row["Item Number"]
+                        new_image = changes["Reference Image"]
+                        
+                        if new_image:
+                            # Process and save the new image
+                            processed_image = process_image(BytesIO(new_image.encode('utf-8')))
+                            if processed_image:
+                                db.save_product_image(sku, processed_image)
+                                st.session_state.reference_images[sku] = processed_image
                     
                     # Handle tag changes
                     if "Tag" in changes:
