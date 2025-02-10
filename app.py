@@ -2107,14 +2107,31 @@ def products_page():
         products_table(df, db)
 
 def paginate_orders(df, page_size=30, current_page=1):
-    """Paginate the orders DataFrame"""
+    """
+    Paginate the orders DataFrame with thorough debugging
+    """
+    # Ensure inputs are valid
     total_orders = len(df)
-    total_pages = (total_orders + page_size - 1) // page_size
+    total_pages = max(1, (total_orders + page_size - 1) // page_size)
     
+    # Validate current_page
+    current_page = max(1, min(current_page, total_pages))
+    
+    # Calculate exact start and end indices
     start_idx = (current_page - 1) * page_size
     end_idx = start_idx + page_size
     
-    paginated_df = df.iloc[start_idx:end_idx]
+    # Slice the DataFrame precisely
+    paginated_df = df.iloc[start_idx:end_idx].copy()
+    
+    # Debugging print statements
+    print(f"Total Orders: {total_orders}")
+    print(f"Page Size: {page_size}")
+    print(f"Current Page: {current_page}")
+    print(f"Total Pages: {total_pages}")
+    print(f"Start Index: {start_idx}")
+    print(f"End Index: {end_idx}")
+    print(f"Paginated DataFrame Length: {len(paginated_df)}")
     
     return paginated_df, total_pages, total_orders
 
