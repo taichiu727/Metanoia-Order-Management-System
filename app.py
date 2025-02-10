@@ -2163,6 +2163,10 @@ def main():
     active_tab = st.radio("Tabs", ["Orders", "Products"], label_visibility="hidden")
     st.session_state.active_tab = active_tab
     
+    Let's modify the page selection to ensure the options always include the current page:
+pythonCopydef main():
+    # ... existing code ...
+
     with tabs[0]:
         if active_tab == "Orders":
             # Get page from query params, default to 1
@@ -2202,15 +2206,20 @@ def main():
                         st.query_params.page = current_page - 1
 
                 with col2:
-                    # Create a list of page numbers, ensuring it includes current page
-                    page_options = list(range(1, max(total_pages + 1, 2)))
+                    # Ensure page options always include the current page
+                    page_options = list(range(max(1, current_page - 5), 
+                                              min(total_pages + 1, current_page + 6)))
+                    
+                    # Fallback if page_options is empty
+                    if not page_options:
+                        page_options = [current_page]
                     
                     # Use a select slider to choose page
                     selected_page = st.select_slider(
                         "Select Page", 
                         options=page_options,
                         value=current_page,
-                        key=f"order_page_selector_{total_pages}"  # Add unique key
+                        key=f"order_page_selector_{total_pages}_{current_page}"
                     )
                     
                     # Update query params if page changes
