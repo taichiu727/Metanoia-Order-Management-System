@@ -1523,21 +1523,24 @@ def order_editor(order_data, order_num, filtered_df, db):
         unique_skus = display_data["Item Number"].unique()
         col1, col2, col3 = st.columns(3)
 
-        st.markdown("""
-                    <style>
-                        .stFileUploader > div > div > button {
-                            padding: 2px 8px;
-                            font-size: 12px;
-                        }
-                        .stFileUploader > div > div:first-child {
-                            width: 50px;
-                        }
-                        .stFileUploader > div {
-                            gap: 8px;
-                            flex-wrap: wrap;
-                        }
-                    </style>
-                """, unsafe_allow_html=True)
+        st.markdown('''
+                <style>
+                    [data-testid='stFileUploader'] {
+                        width: max-content;
+                    }
+                    [data-testid='stFileUploader'] section {
+                        padding: 0;
+                        float: left;
+                    }
+                    [data-testid='stFileUploader'] section > input + div {
+                        display: none;
+                    }
+                    [data-testid='stFileUploader'] section + div {
+                        float: right;
+                        padding-top: 0;
+                    }
+                </style>
+            ''', unsafe_allow_html=True)
         
         for idx, sku in enumerate(unique_skus):
             with col1 if idx % 3 == 0 else col2 if idx % 3 == 1 else col3:
