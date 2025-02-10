@@ -1525,66 +1525,48 @@ def order_editor(order_data, order_num, filtered_df, db):
 
         st.markdown('''
             <style>
-                /* Adjust file uploader container */
                 [data-testid='stFileUploader'] {
                     width: max-content;
-                    display: flex;
-                    align-items: center;
-                    gap: 10px; /* Space between elements */
                 }
-                
-                /* Adjust file uploader section */
                 [data-testid='stFileUploader'] section {
                     padding: 0;
-                    margin: 0;
-                    display: flex;
-                    align-items: center;
+                    float: left;
                 }
-                
-                /* Hide default file name display */
                 [data-testid='stFileUploader'] section > input + div {
                     display: none;
                 }
-                
-                /* Make the buttons smaller and inline */
+                [data-testid='stFileUploader'] section + div {
+                    float: right;
+                    padding-top: 0;
+                }
+                /* Make the buttons smaller */
                 [data-testid='stFileUploader'] button {
                     padding: 2px 8px !important;
                     font-size: 12px !important;
-                    margin: 0 !important;
-                }
-                
-                /* Ensure caption and uploader are close */
-                [data-testid='stFileUploader'] {
-                    flex-direction: row;
                 }
             </style>
         ''', unsafe_allow_html=True)
-
+        
         for idx, sku in enumerate(unique_skus):
             with col1 if idx % 3 == 0 else col2 if idx % 3 == 1 else col3:
-                col_a, col_b = st.columns([1, 3])  # Adjust column widths as needed
+                st.caption(f"SKU: {sku}") 
+                uploaded_file = st.file_uploader(
+                    " ",  # Empty label since we're using caption above
+                    type=["png", "jpg", "jpeg"],
+                    key=f"uploader_{order_num}_{sku}",
+                    label_visibility="collapsed"
+                )
                 
-                with col_a:
-                    st.caption(f"SKU: {sku}")
-                
-                with col_b:
-                    uploaded_file = st.file_uploader(
-                        " ",  # Empty label since we're using caption above
-                        type=["png", "jpg", "jpeg"],
-                        key=f"uploader_{order_num}_{sku}",
-                        label_visibility="collapsed"
-                    )
-                    
-                    if uploaded_file:
-                        processed_image = process_image(uploaded_file)
-                        if processed_image:
-                            # Save to database
-                            db.save_product_image(sku, processed_image)
-                            # Update session state
-                            st.session_state.reference_images[sku] = processed_image
-                            # Show success message
-                            st.success(f"Image updated for {sku}")
-                            # Trigger a rerun to show the updated image
+                if uploaded_file:
+                    processed_image = process_image(uploaded_file)
+                    if processed_image:
+                        # Save to database
+                        db.save_product_image(sku, processed_image)
+                        # Update session state
+                        st.session_state.reference_images[sku] = processed_image
+                        # Show success message
+                        st.success(f"Image updated for {sku}")
+                        # Trigger a rerun to show the updated image 
                         
                         
                        
