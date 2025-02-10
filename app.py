@@ -2106,6 +2106,17 @@ def products_page():
         # Display table with pagination
         products_table(df, db)
 
+def paginate_orders(df, page_size=30, current_page=1):
+    """Paginate the orders DataFrame"""
+    total_orders = len(df)
+    total_pages = (total_orders + page_size - 1) // page_size
+    
+    start_idx = (current_page - 1) * page_size
+    end_idx = start_idx + page_size
+    
+    paginated_df = df.iloc[start_idx:end_idx]
+    
+    return paginated_df, total_pages, total_orders
 
 def main():
     st.set_page_config(page_title="Order Management", layout="wide")
@@ -2149,15 +2160,65 @@ def main():
             if st.session_state.orders_need_refresh:
                 st.session_state.orders_df = fetch_and_process_orders(token, db)
                 st.session_state.orders_need_refresh = False
+                # Reset pagination when refreshing orders
+                st.session_state.current_order_page = 1
 
             if not st.session_state.orders_df.empty:
+                # Initialize current page if not set
+                if 'current_order_page' not in st.session_state:
+                    st.session_state.current_order_page = 1
+
+                # Apply filters
                 filtered_df = apply_filters(
                     st.session_state.orders_df, 
                     st.session_state.get('status_filter', 'All'),
                     st.session_state.get('show_preorders', False)
                 )
+
+                # Paginate orders
+                page_size = 30
+                paginated_df, total_pages, total_orders = paginate_orders(
+                    filtered_df, 
+                    page_size=page_size, 
+                    current_page=st.session_state.current_order_page
+                )
                 
-                edited_df = orders_table(filtered_df)
+                # Pagination controls
+                col1, col2, col3 = st.columns([1,2,1])
+                
+                with col1:
+                    if st.button("⬅️ Previous", 
+                                 disabled=st.session_state.current_order_page == 1):
+                        st.session_state.current_order_page -= 1
+                
+                with col2:
+                    # Create a list of page numbers
+                    page_options = list(range(1, total_pages + 1))
+                    
+                    # Use a select slider to choose page
+                    selected_page = st.select_slider(
+                        "Select Page", 
+                        options=page_options,
+                        value=st.session_state.current_order_page,
+                        key="order_page_selector"
+                    )
+                    
+                    # Update current page if selection changes
+                    if selected_page != st.session_state.current_order_page:
+                        st.session_state.current_order_page = selected_page
+                
+                    # Display current page and total orders
+                    st.write(f"Page {st.session_state.current_order_page} of {total_pages}")
+                    st.write(f"Total Orders: {total_orders}")
+                
+                with col3:
+                    if st.button("Next ➡️", 
+                                 disabled=st.session_state.current_order_page >= total_pages):
+                        st.session_state.current_order_page += 1
+                
+                # Display paginated orders
+                edited_df = orders_table(paginated_df)
+                
                 statistics_view(edited_df)
                 
                 st.divider()
