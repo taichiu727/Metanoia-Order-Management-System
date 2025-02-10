@@ -1170,6 +1170,9 @@ def download_shipping_document(access_token, client_id, client_secret, shop_id, 
         
         if response.status_code != 200:
             st.error(f"HTTP Error {response.status_code}: {response.text}")
+            # Print full response details for debugging
+            st.write("Full Response Headers:", response.headers)
+            st.write("Full Response Content:", response.text)
             return None
             
         content_type = response.headers.get('content-type', '').lower()
