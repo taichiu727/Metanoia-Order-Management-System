@@ -1519,7 +1519,6 @@ def order_editor(order_data, order_num, filtered_df, db):
                      "Item Spec", "Item Number", "Quantity", "Image"]
         )
         
-        # Add file uploaders for each unique SKU
         unique_skus = display_data["Item Number"].unique()
         col1, col2, col3 = st.columns(3)
 
@@ -1527,6 +1526,7 @@ def order_editor(order_data, order_num, filtered_df, db):
             <style>
                 [data-testid='stFileUploader'] {
                     width: max-content;
+                    margin-left: 10px;
                 }
                 [data-testid='stFileUploader'] section {
                     padding: 0;
@@ -1546,27 +1546,33 @@ def order_editor(order_data, order_num, filtered_df, db):
                 }
             </style>
         ''', unsafe_allow_html=True)
-        
+
         for idx, sku in enumerate(unique_skus):
             with col1 if idx % 3 == 0 else col2 if idx % 3 == 1 else col3:
-                st.caption(f"SKU: {sku}") 
-                uploaded_file = st.file_uploader(
-                    " ",  # Empty label since we're using caption above
-                    type=["png", "jpg", "jpeg"],
-                    key=f"uploader_{order_num}_{sku}",
-                    label_visibility="collapsed"
-                )
+                # Create sub-columns within each main column
+                sku_col, uploader_col = st.columns([1, 3])
                 
-                if uploaded_file:
-                    processed_image = process_image(uploaded_file)
-                    if processed_image:
-                        # Save to database
-                        db.save_product_image(sku, processed_image)
-                        # Update session state
-                        st.session_state.reference_images[sku] = processed_image
-                        # Show success message
-                        st.success(f"Image updated for {sku}")
-                        # Trigger a rerun to show the updated image 
+                with sku_col:
+                    st.caption(f"SKU: {sku}")
+                
+                with uploader_col:
+                    uploaded_file = st.file_uploader(
+                        " ",  # Empty label since we're using caption above
+                        type=["png", "jpg", "jpeg"],
+                        key=f"uploader_{order_num}_{sku}",
+                        label_visibility="collapsed"
+                    )
+                    
+                    if uploaded_file:
+                        processed_image = process_image(uploaded_file)
+                        if processed_image:
+                            # Save to database
+                            db.save_product_image(sku, processed_image)
+                            # Update session state
+                            st.session_state.reference_images[sku] = processed_image
+                            # Show success message
+                            st.success(f"Image updated for {sku}")
+                            # Trigger a rerun to show the updated image
                         
                         
                        
