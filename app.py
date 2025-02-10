@@ -1483,6 +1483,12 @@ def order_editor(order_data, order_num, filtered_df, db):
 
 
         editor_key = f"order_{order_num}"
+
+        # Add Reference Images to display data
+        display_data = order_data.copy()
+        display_data["Reference Image"] = display_data["Item Number"].map(
+            lambda x: f"data:image/jpeg;base64,{st.session_state.reference_images.get(x, '')}" if x in st.session_state.reference_images else None
+        )
         
         display_data = order_data[["Order Number", "Created", "Deadline", "Product", 
                                 "Item Spec", "Item Number", "Quantity", "Image", 
@@ -1498,19 +1504,12 @@ def order_editor(order_data, order_num, filtered_df, db):
                      "Item Spec", "Item Number", "Quantity", "Image"]
         )
 
-        # Add image upload section for each unique SKU
-        st.write("Reference Images:")
+        # Add file uploaders for each unique SKU
         unique_skus = display_data["Item Number"].unique()
-        cols = st.columns(min(3, len(unique_skus)))  # Show up to 3 columns
+        col1, col2, col3 = st.columns(3)
 
         for idx, sku in enumerate(unique_skus):
-            with cols[idx % 3]:
-                # Show current image if exists
-                current_image = st.session_state.reference_images.get(sku)
-                if current_image:
-                    st.image(f"data:image/jpeg;base64,{current_image}", caption=f"Current image for {sku}")
-                
-                # Add upload button
+            with col1 if idx % 3 == 0 else col2 if idx % 3 == 1 else col3:
                 uploaded_file = st.file_uploader(
                     f"Upload image for {sku}",
                     type=["png", "jpg", "jpeg"],
@@ -1526,6 +1525,8 @@ def order_editor(order_data, order_num, filtered_df, db):
                         st.session_state.reference_images[sku] = processed_image
                         # Show success message
                         st.success(f"Image updated for {sku}")
+                        # Trigger a rerun to show the updated image
+                       
                        
         
         if editor_key in st.session_state and "edited_rows" in st.session_state[editor_key]:
@@ -1537,21 +1538,6 @@ def order_editor(order_data, order_num, filtered_df, db):
                 for idx_str, changes in edited_rows.items():
                     idx = int(idx_str)
                     row = edited_df.iloc[idx]
-                    
-                    # Handle reference image updates
-                    if "Reference Image" in changes:
-                        sku = row["Item Number"]
-                        new_image = changes["Reference Image"]
-                        
-                        if new_image:
-                            # Process and save the new image
-                            processed_image = process_image(BytesIO(new_image.encode('utf-8')))
-                            if processed_image:
-                                db.save_product_image(sku, processed_image)
-                                st.session_state.reference_images[sku] = processed_image
-                                # Update the Reference Image column in filtered_df
-                                sku_mask = filtered_df['Item Number'] == sku
-                                filtered_df.loc[sku_mask, 'Reference Image'] = processed_image
                     
                     # Handle tag changes
                     if "Tag" in changes:
