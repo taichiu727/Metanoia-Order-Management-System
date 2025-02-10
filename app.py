@@ -1500,9 +1500,13 @@ def order_editor(order_data, order_num, filtered_df, db):
         # Debug: Show what data we're passing to the editor
         st.write("Debug - First row Reference Image data:", display_data["Reference Image"].iloc[0][:100] if not display_data.empty else "No data")
         
-        display_data = order_data[["Order Number", "Created", "Deadline", "Product", 
-                                "Item Spec", "Item Number", "Quantity", "Image", 
-                                "Reference Image", "Received", "Missing", "Note", "Tag"]]
+        display_data = display_data[["Order Number", "Created", "Deadline", "Product", 
+                                   "Item Spec", "Item Number", "Quantity", "Image", 
+                                   "Reference Image", "Received", "Missing", "Note", "Tag"]]
+
+        #display_data = order_data[["Order Number", "Created", "Deadline", "Product", 
+        #                        "Item Spec", "Item Number", "Quantity", "Image", 
+         #                       "Reference Image", "Received", "Missing", "Note", "Tag"]]
         
         edited_df = st.data_editor(
             display_data,
