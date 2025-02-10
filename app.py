@@ -1519,43 +1519,55 @@ def order_editor(order_data, order_num, filtered_df, db):
                      "Item Spec", "Item Number", "Quantity", "Image"]
         )
         
+        # Add file uploaders for each unique SKU
         unique_skus = display_data["Item Number"].unique()
         col1, col2, col3 = st.columns(3)
 
         st.markdown('''
             <style>
+                /* Adjust file uploader container */
                 [data-testid='stFileUploader'] {
                     width: max-content;
-                    margin-left: 10px;
+                    display: flex;
+                    align-items: center;
+                    gap: 10px; /* Space between elements */
                 }
+                
+                /* Adjust file uploader section */
                 [data-testid='stFileUploader'] section {
                     padding: 0;
-                    float: left;
+                    margin: 0;
+                    display: flex;
+                    align-items: center;
                 }
+                
+                /* Hide default file name display */
                 [data-testid='stFileUploader'] section > input + div {
                     display: none;
                 }
-                [data-testid='stFileUploader'] section + div {
-                    float: right;
-                    padding-top: 0;
-                }
-                /* Make the buttons smaller */
+                
+                /* Make the buttons smaller and inline */
                 [data-testid='stFileUploader'] button {
                     padding: 2px 8px !important;
                     font-size: 12px !important;
+                    margin: 0 !important;
+                }
+                
+                /* Ensure caption and uploader are close */
+                [data-testid='stFileUploader'] {
+                    flex-direction: row;
                 }
             </style>
         ''', unsafe_allow_html=True)
 
         for idx, sku in enumerate(unique_skus):
             with col1 if idx % 3 == 0 else col2 if idx % 3 == 1 else col3:
-                # Create sub-columns within each main column
-                sku_col, uploader_col = st.columns([1, 3])
+                col_a, col_b = st.columns([1, 3])  # Adjust column widths as needed
                 
-                with sku_col:
+                with col_a:
                     st.caption(f"SKU: {sku}")
                 
-                with uploader_col:
+                with col_b:
                     uploaded_file = st.file_uploader(
                         " ",  # Empty label since we're using caption above
                         type=["png", "jpg", "jpeg"],
