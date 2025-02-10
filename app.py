@@ -1530,7 +1530,7 @@ def order_editor(order_data, order_num, filtered_df, db):
                             font-size: 12px;
                         }
                         .stFileUploader > div > div:first-child {
-                            width: 150px;
+                            width: 50px;
                         }
                         .stFileUploader > div {
                             gap: 8px;
