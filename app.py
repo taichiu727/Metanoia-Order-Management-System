@@ -1670,12 +1670,34 @@ def orders_table(filtered_df):
     
     if 'Tag' not in filtered_df.columns:
         filtered_df['Tag'] = filtered_df['Item Number'].map(lambda x: st.session_state.product_tags.get(x, ''))
-
-    # Split into individual order editors
-    orders = filtered_df.groupby('Order Number')
-    for order_num, order_data in orders:
-        order_editor(order_data, order_num, filtered_df, db)
-
+    
+    # Sort orders by date (most recent first)
+    filtered_df = filtered_df.sort_values('Created', ascending=False)
+    
+    # Calculate total sections
+    total_orders = len(filtered_df)
+    total_sections = (total_orders + 49) // 50  # Ceiling division
+    
+    # Create tabs for each section
+    section_tabs = st.tabs([f"Section {i+1}" for i in range(total_sections)])
+    
+    for section_idx in range(total_sections):
+        with section_tabs[section_idx]:
+            # Calculate slice for this section
+            start_idx = section_idx * 50
+            end_idx = min((section_idx + 1) * 50, total_orders)
+            
+            # Get orders for this section
+            section_df = filtered_df.iloc[start_idx:end_idx]
+            
+            # Display summary
+            st.write(f"Showing orders {start_idx + 1} - {end_idx} of {total_orders}")
+            
+            # Group and display orders within this section
+            orders = section_df.groupby('Order Number')
+            for order_num, order_data in orders:
+                order_editor(order_data, order_num, section_df, db)
+    
     return filtered_df
 
 @st.fragment
