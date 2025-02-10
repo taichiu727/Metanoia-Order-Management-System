@@ -1675,7 +1675,7 @@ def orders_table(filtered_df):
     filtered_df = filtered_df.sort_values('Created', ascending=True)
     
     # Calculate total sections
-    total_orders = len(filtered_df)
+    total_orders = len(filtered_df['Order Number'].unique())
     total_sections = (total_orders + 49) // 50  # Ceiling division
     
     # Create tabs for each section
@@ -1687,30 +1687,21 @@ def orders_table(filtered_df):
             start_idx = section_idx * 50
             end_idx = min((section_idx + 1) * 50, total_orders)
             
-            # Get orders for this section
-            section_df = filtered_df.iloc[start_idx:end_idx]
+            # Get unique order numbers for this section
+            section_order_numbers = filtered_df['Order Number'].unique()[start_idx:end_idx]
+            
+            # Filter DataFrame to include only orders in this section
+            section_df = filtered_df[filtered_df['Order Number'].isin(section_order_numbers)]
             
             # Display summary
             st.write(f"Showing orders {start_idx + 1} - {end_idx} of {total_orders}")
+            st.write(f"Total rows in this section: {len(section_df)}")
+            st.write(f"Unique order numbers in this section: {len(section_order_numbers)}")
             
-            # Diagnostic information
-            st.write(f"Total orders in this section: {len(section_df)}")
-            st.write(f"Unique Order Numbers in this section: {section_df['Order Number'].nunique()}")
-            
-            # Create a list to track processed order numbers
-            processed_order_numbers = set()
-            
-            # Iterate through unique orders in the section
-            for idx, order_num in enumerate(section_df['Order Number'].unique()):
-                # Skip if this order number has already been processed
-                if order_num in processed_order_numbers:
-                    continue
-                
+            # Process each unique order
+            for idx, order_num in enumerate(section_order_numbers):
                 # Get all rows for this order number
                 order_data = section_df[section_df['Order Number'] == order_num]
-                
-                # Mark this order number as processed
-                processed_order_numbers.add(order_num)
                 
                 # Create a truly unique key
                 unique_order_editor_key = f"section_{section_idx}_orderidx_{idx}_order_{order_num}"
@@ -1725,9 +1716,6 @@ def orders_table(filtered_df):
                     )
                 except Exception as e:
                     st.error(f"Error rendering order {order_num}: {str(e)}")
-            
-            # Final check
-            st.write(f"Processed unique order numbers: {len(processed_order_numbers)}")
     
     return filtered_df
 
