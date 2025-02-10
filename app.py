@@ -2108,7 +2108,7 @@ def products_page():
 
 def paginate_orders(df, page_size=30, current_page=1):
     """
-    Paginate the orders DataFrame with thorough debugging
+    Paginate the orders DataFrame with robust handling
     """
     # Ensure inputs are valid
     total_orders = len(df)
@@ -2123,15 +2123,6 @@ def paginate_orders(df, page_size=30, current_page=1):
     
     # Slice the DataFrame precisely
     paginated_df = df.iloc[start_idx:end_idx].copy()
-    
-    # Debugging print statements
-    print(f"Total Orders: {total_orders}")
-    print(f"Page Size: {page_size}")
-    print(f"Current Page: {current_page}")
-    print(f"Total Pages: {total_pages}")
-    print(f"Start Index: {start_idx}")
-    print(f"End Index: {end_idx}")
-    print(f"Paginated DataFrame Length: {len(paginated_df)}")
     
     return paginated_df, total_pages, total_orders
 
@@ -2211,15 +2202,15 @@ def main():
                         st.query_params.page = current_page - 1
 
                 with col2:
-                    # Create a list of page numbers
-                    page_options = list(range(1, total_pages + 1))
+                    # Create a list of page numbers, ensuring it includes current page
+                    page_options = list(range(1, max(total_pages + 1, 2)))
                     
                     # Use a select slider to choose page
                     selected_page = st.select_slider(
                         "Select Page", 
                         options=page_options,
                         value=current_page,
-                        key="order_page_selector"
+                        key=f"order_page_selector_{total_pages}"  # Add unique key
                     )
                     
                     # Update query params if page changes
