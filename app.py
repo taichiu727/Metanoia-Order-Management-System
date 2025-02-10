@@ -1671,8 +1671,8 @@ def orders_table(filtered_df):
     if 'Tag' not in filtered_df.columns:
         filtered_df['Tag'] = filtered_df['Item Number'].map(lambda x: st.session_state.product_tags.get(x, ''))
     
-    # Sort orders by date (most recent first)
-    filtered_df = filtered_df.sort_values('Created', ascending=False)
+    # Sort orders from oldest to newest
+    filtered_df = filtered_df.sort_values('Created', ascending=True)
     
     # Calculate total sections
     total_orders = len(filtered_df)
@@ -1695,16 +1695,20 @@ def orders_table(filtered_df):
             
             # Group and display orders within this section
             orders = section_df.groupby('Order Number')
-            for order_num, order_data in orders:
-                # Add section index to make keys unique
-                unique_order_editor_key = f"section_{section_idx}_order_{order_num}"
-                order_editor(
-                    order_data, 
-                    order_num, 
-                    section_df, 
-                    db, 
-                    unique_key=unique_order_editor_key
-                )
+            for idx, (order_num, order_data) in enumerate(orders):
+                # Create a truly unique key by combining section, order index, and order number
+                unique_order_editor_key = f"section_{section_idx}_orderidx_{idx}_order_{order_num}"
+                
+                try:
+                    order_editor(
+                        order_data, 
+                        order_num, 
+                        section_df, 
+                        db, 
+                        unique_key=unique_order_editor_key
+                    )
+                except Exception as e:
+                    st.error(f"Error rendering order {order_num}: {str(e)}")
     
     return filtered_df
 
