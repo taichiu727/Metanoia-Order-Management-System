@@ -1243,13 +1243,12 @@ def get_column_config():
         "Item Number": st.column_config.TextColumn("Item Number", width="small"),
         "Quantity": st.column_config.NumberColumn("Quantity", width="small"),
         "Image": st.column_config.ImageColumn("Image", width="small"),
-        "Reference Image": st.column_config.ImageColumn(
-                "Reference Image",
-                width="small",
-                help="Upload a reference image of the actual product (max 800x800px, 500KB)",
-                input_type="file",
-                allowed_extensions=["png", "jpg", "jpeg"]
-            ),
+        "Reference Image": st.column_config.FileUploader(  # Change to FileUploader for image upload
+            "Reference Image",
+            width="small",
+            help="Upload a reference image of the actual product (max 800x800px, 500KB)",
+            type=["png", "jpg", "jpeg"]
+        ),
         "Tag": st.column_config.TextColumn("Tag", width="small", required=False),
         "Received": st.column_config.CheckboxColumn("Received", width="small", default=False),
         "Missing": st.column_config.NumberColumn("Missing", width="small", default=0),
