@@ -2163,10 +2163,6 @@ def main():
     active_tab = st.radio("Tabs", ["Orders", "Products"], label_visibility="hidden")
     st.session_state.active_tab = active_tab
     
-    Let's modify the page selection to ensure the options always include the current page:
-pythonCopydef main():
-    # ... existing code ...
-
     with tabs[0]:
         if active_tab == "Orders":
             # Get page from query params, default to 1
