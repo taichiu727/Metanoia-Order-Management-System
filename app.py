@@ -774,7 +774,7 @@ def fetch_and_process_orders(token, db):
                         "Product": item["item_name"],
                         "Quantity": item["model_quantity_purchased"],
                         "Image": item["image_info"]["image_url"],
-                        "Reference Image": reference_images.get(item["item_sku"], ""),
+                        "Reference Images": reference_images,
                         "Item Spec": item["model_name"],
                         "Item Number": item["item_sku"],
                         "Received": tracking['received'],
