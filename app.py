@@ -1275,7 +1275,7 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
         # Add shipping controls
         col1, col2, col3 = st.columns([2, 1, 1])
         with col2:
-            if st.button("出貨 🚚", key=f"ship_{unique_key or order_num}"):
+            if st.button("出貨 🚚", key=f"ship_{unique_key}"):
                 token = check_token_validity(db)
                 if token:
                     # Ship the order
@@ -1380,7 +1380,7 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
                     st.error("Invalid token. Please re-authenticate.")
 
         with col3:
-            if st.button("列印 🖨️", key=f"print_{unique_key or order_num}"):
+            if st.button("列印 🖨️", key=f"print_{unique_key}"):
                 token = check_token_validity(db)
                 if token:
                     # Get tracking number first
@@ -1491,7 +1491,7 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
 
 
 
-        editor_key = f"order_{order_num}"
+        editor_key = f"editor_{unique_key}"
 
         # Add Reference Images to display data
         display_data = order_data.copy()
