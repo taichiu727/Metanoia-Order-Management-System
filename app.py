@@ -1242,10 +1242,12 @@ def get_column_config():
         "Quantity": st.column_config.NumberColumn("Quantity", width="small"),
         "Image": st.column_config.ImageColumn("Image", width="small"),
         "Reference Image": st.column_config.ImageColumn(
-            "Reference Image",
-            width="small",
-            help="Upload a reference image of the actual product (max 800x800px, 500KB)"
-        ),
+                "Reference Image",
+                width="small",
+                help="Upload a reference image of the actual product (max 800x800px, 500KB)",
+                input_type="file",
+                allowed_extensions=["png", "jpg", "jpeg"]
+            ),
         "Tag": st.column_config.TextColumn("Tag", width="small", required=False),
         "Received": st.column_config.CheckboxColumn("Received", width="small", default=False),
         "Missing": st.column_config.NumberColumn("Missing", width="small", default=0),
@@ -1517,6 +1519,9 @@ def order_editor(order_data, order_num, filtered_df, db):
                             if processed_image:
                                 db.save_product_image(sku, processed_image)
                                 st.session_state.reference_images[sku] = processed_image
+                                # Update the Reference Image column in filtered_df
+                                sku_mask = filtered_df['Item Number'] == sku
+                                filtered_df.loc[sku_mask, 'Reference Image'] = processed_image
                     
                     # Handle tag changes
                     if "Tag" in changes:
