@@ -1234,18 +1234,6 @@ def sidebar_controls():
             st.session_state.clear()
             st.rerun()
 
-def apply_quantity_styling():
-    """Add custom CSS to highlight cells with quantity > 1"""
-    st.markdown("""
-    <style>
-    /* Target quantity cells with value > 1 */
-    [data-testid='stDataEditor'] [role='gridcell']:has(div[data-testid='stCellValue'] div[data-testid='stCellValue']:text-matches('^[2-9]\d*$')) {
-        background-color: #FFFF00 !important;
-        font-weight: bold;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
 @st.cache_data
 def get_column_config():
     return {
@@ -1521,9 +1509,20 @@ def order_editor(order_data, order_num, filtered_df, db):
         #                        "Item Spec", "Item Number", "Quantity", "Image", 
          #                       "Reference Image", "Received", "Missing", "Note", "Tag"]]
         
-        apply_quantity_styling()
+        def highlight_quantity(df):
+            """
+            Highlight cells with quantity > 1 in yellow
+            """
+            def color_quantity(val):
+                return 'background-color: yellow' if val > 1 else ''
+            
+            return df.style.applymap(color_quantity, subset=['Quantity'])
+
+        # In your order_editor function, modify the data editor creation
+        display_data_styled = highlight_quantity(display_data)
+       
         edited_df = st.data_editor(
-            display_data,
+            display_data_styled,
             column_config=get_column_config(),
             use_container_width=True,
             key=editor_key,
