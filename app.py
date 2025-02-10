@@ -767,6 +767,8 @@ def fetch_and_process_orders(token, db):
                         (order_detail["order_sn"], item["item_name"], item["model_name"]), 
                         {'received': False, 'missing_count': 0, 'note': ''}
                     )
+                    item_sku = item.get("item_sku", "")
+                    reference_image = reference_images.get(item_sku, "")
                     orders_data.append({
                         "Order Number": order_detail["order_sn"],
                         "Created": datetime.fromtimestamp(order_detail["create_time"]).strftime("%Y-%m-%d %H:%M"),
@@ -774,7 +776,7 @@ def fetch_and_process_orders(token, db):
                         "Product": item["item_name"],
                         "Quantity": item["model_quantity_purchased"],
                         "Image": item["image_info"]["image_url"],
-                        "Reference Images": reference_images,
+                        "Reference Image": reference_image,
                         "Item Spec": item["model_name"],
                         "Item Number": item["item_sku"],
                         "Received": tracking['received'],
