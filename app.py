@@ -1243,7 +1243,13 @@ def get_column_config():
         "Product": st.column_config.TextColumn("Product", width="medium"),
         "Item Spec": st.column_config.TextColumn("Item Spec", width="small"),
         "Item Number": st.column_config.TextColumn("Item Number", width="small"),
-        "Quantity": st.column_config.NumberColumn("Quantity", width="small"),
+        "Quantity": st.column_config.NumberColumn(
+            "Quantity", 
+            width="small",
+            help="Highlighted in yellow if quantity > 1",
+            format="%d",
+            color=lambda x: "white" if x <= 1 else "rgb(255, 255, 0)"  # Yellow for quantities > 1
+        ),
         "Image": st.column_config.ImageColumn("Image", width="small"),
         "Reference Image": st.column_config.ImageColumn(
             "Reference Image",
