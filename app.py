@@ -1696,7 +1696,15 @@ def orders_table(filtered_df):
             # Group and display orders within this section
             orders = section_df.groupby('Order Number')
             for order_num, order_data in orders:
-                order_editor(order_data, order_num, section_df, db)
+                # Add section index to make keys unique
+                unique_order_editor_key = f"section_{section_idx}_order_{order_num}"
+                order_editor(
+                    order_data, 
+                    order_num, 
+                    section_df, 
+                    db, 
+                    unique_key=unique_order_editor_key
+                )
     
     return filtered_df
 
