@@ -1486,9 +1486,18 @@ def order_editor(order_data, order_num, filtered_df, db):
 
         # Add Reference Images to display data
         display_data = order_data.copy()
-        display_data["Reference Image"] = display_data["Item Number"].map(
-            lambda x: f"data:image/jpeg;base64,{st.session_state.reference_images.get(x, '')}" if x in st.session_state.reference_images else None
-        )
+        def format_reference_image(sku):
+            base64_data = st.session_state.reference_images.get(sku)
+            if base64_data:
+                # Debug: Print the first few characters of the base64 data
+                st.write(f"Debug - Base64 data for {sku} starts with: {base64_data[:50]}")
+                return base64_data  # Try without data URL prefix
+            return None
+
+        display_data["Reference Image"] = display_data["Item Number"].apply(format_reference_image)
+        
+        # Debug: Show what data we're passing to the editor
+        st.write("Debug - First row Reference Image data:", display_data["Reference Image"].iloc[0][:100] if not display_data.empty else "No data")
         
         display_data = order_data[["Order Number", "Created", "Deadline", "Product", 
                                 "Item Spec", "Item Number", "Quantity", "Image", 
