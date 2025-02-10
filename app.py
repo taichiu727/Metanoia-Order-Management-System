@@ -2157,17 +2157,18 @@ def main():
     
     with tabs[0]:
         if active_tab == "Orders":
+            # Get page from query params, default to 1
+            current_page = int(st.query_params.get("page", 1))
+            st.session_state.current_order_page = current_page
+
             if st.session_state.orders_need_refresh:
                 st.session_state.orders_df = fetch_and_process_orders(token, db)
                 st.session_state.orders_need_refresh = False
                 # Reset pagination when refreshing orders
+                current_page = 1
                 st.session_state.current_order_page = 1
 
             if not st.session_state.orders_df.empty:
-                # Initialize current page if not set
-                if 'current_order_page' not in st.session_state:
-                    st.session_state.current_order_page = 1
-
                 # Apply filters
                 filtered_df = apply_filters(
                     st.session_state.orders_df, 
@@ -2180,7 +2181,7 @@ def main():
                 paginated_df, total_pages, total_orders = paginate_orders(
                     filtered_df, 
                     page_size=page_size, 
-                    current_page=st.session_state.current_order_page
+                    current_page=current_page
                 )
                 
                 # Pagination controls
@@ -2188,9 +2189,10 @@ def main():
                 
                 with col1:
                     if st.button("⬅️ Previous", 
-                                 disabled=st.session_state.current_order_page == 1):
-                        st.session_state.current_order_page -= 1
-                
+                                 disabled=current_page == 1):
+                        # Update query params to change page
+                        st.query_params.page = current_page - 1
+
                 with col2:
                     # Create a list of page numbers
                     page_options = list(range(1, total_pages + 1))
@@ -2199,25 +2201,31 @@ def main():
                     selected_page = st.select_slider(
                         "Select Page", 
                         options=page_options,
-                        value=st.session_state.current_order_page,
+                        value=current_page,
                         key="order_page_selector"
                     )
                     
-                    # Update current page if selection changes
-                    if selected_page != st.session_state.current_order_page:
-                        st.session_state.current_order_page = selected_page
+                    # Update query params if page changes
+                    if selected_page != current_page:
+                        st.query_params.page = selected_page
                 
                     # Display current page and total orders
-                    st.write(f"Page {st.session_state.current_order_page} of {total_pages}")
+                    st.write(f"Page {current_page} of {total_pages}")
                     st.write(f"Total Orders: {total_orders}")
                 
                 with col3:
                     if st.button("Next ➡️", 
-                                 disabled=st.session_state.current_order_page >= total_pages):
-                        st.session_state.current_order_page += 1
+                                 disabled=current_page >= total_pages):
+                        # Update query params to change page
+                        st.query_params.page = current_page + 1
                 
-                # Display paginated orders
-                edited_df = orders_table(paginated_df)
+                # Use fragment to prevent full page reload on edits
+                @st.fragment
+                def render_orders_table():
+                    edited_df = orders_table(paginated_df)
+                    return edited_df
+
+                edited_df = render_orders_table()
                 
                 statistics_view(edited_df)
                 
