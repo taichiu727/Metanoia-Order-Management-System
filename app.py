@@ -1516,7 +1516,7 @@ def order_editor(order_data, order_num, filtered_df, db):
             def color_quantity(val):
                 return 'background-color: yellow' if val > 1 else ''
             
-            return df.style.applymap(color_quantity, subset=['Quantity'])
+            return df.style.map(color_quantity, subset=['Quantity'])
 
         # In your order_editor function, modify the data editor creation
         display_data_styled = highlight_quantity(display_data)
