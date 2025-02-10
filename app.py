@@ -1693,12 +1693,26 @@ def orders_table(filtered_df):
             # Display summary
             st.write(f"Showing orders {start_idx + 1} - {end_idx} of {total_orders}")
             
-            # Group orders within this section
-            orders = section_df.groupby('Order Number')
+            # Diagnostic information
+            st.write(f"Total orders in this section: {len(section_df)}")
+            st.write(f"Unique Order Numbers in this section: {section_df['Order Number'].nunique()}")
             
-            # Ensure we process all orders in this section
-            for idx, (order_num, order_data) in enumerate(orders):
-                # Create a truly unique key by combining section, order index, and order number
+            # Create a list to track processed order numbers
+            processed_order_numbers = set()
+            
+            # Iterate through unique orders in the section
+            for idx, order_num in enumerate(section_df['Order Number'].unique()):
+                # Skip if this order number has already been processed
+                if order_num in processed_order_numbers:
+                    continue
+                
+                # Get all rows for this order number
+                order_data = section_df[section_df['Order Number'] == order_num]
+                
+                # Mark this order number as processed
+                processed_order_numbers.add(order_num)
+                
+                # Create a truly unique key
                 unique_order_editor_key = f"section_{section_idx}_orderidx_{idx}_order_{order_num}"
                 
                 try:
@@ -1712,9 +1726,8 @@ def orders_table(filtered_df):
                 except Exception as e:
                     st.error(f"Error rendering order {order_num}: {str(e)}")
             
-            # If fewer than 50 orders are shown, display a message
-            if len(orders) < 50:
-                st.info(f"Total orders in this section: {len(orders)}")
+            # Final check
+            st.write(f"Processed unique order numbers: {len(processed_order_numbers)}")
     
     return filtered_df
 
