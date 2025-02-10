@@ -1523,6 +1523,7 @@ def order_editor(order_data, order_num, filtered_df, db):
         unique_skus = display_data["Item Number"].unique()
         col1, col2, col3 = st.columns(3)
 
+        """
         for idx, sku in enumerate(unique_skus):
             with col1 if idx % 3 == 0 else col2 if idx % 3 == 1 else col3:
                 uploaded_file = st.file_uploader(
@@ -1540,7 +1541,7 @@ def order_editor(order_data, order_num, filtered_df, db):
                         st.session_state.reference_images[sku] = processed_image
                         # Show success message
                         st.success(f"Image updated for {sku}")
-                        # Trigger a rerun to show the updated image
+                        # Trigger a rerun to show the updated image """
                        
                        
         
