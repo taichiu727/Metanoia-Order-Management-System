@@ -1524,28 +1524,33 @@ def order_editor(order_data, order_num, filtered_df, db):
         col1, col2, col3 = st.columns(3)
 
         st.markdown('''
-                <style>
-                    [data-testid='stFileUploader'] {
-                        width: max-content;
-                    }
-                    [data-testid='stFileUploader'] section {
-                        padding: 0;
-                        float: left;
-                    }
-                    [data-testid='stFileUploader'] section > input + div {
-                        display: none;
-                    }
-                    [data-testid='stFileUploader'] section + div {
-                        float: right;
-                        padding-top: 0;
-                    }
-                </style>
-            ''', unsafe_allow_html=True)
+            <style>
+                [data-testid='stFileUploader'] {
+                    width: max-content;
+                }
+                [data-testid='stFileUploader'] section {
+                    padding: 0;
+                    float: left;
+                }
+                [data-testid='stFileUploader'] section > input + div {
+                    display: none;
+                }
+                [data-testid='stFileUploader'] section + div {
+                    float: right;
+                    padding-top: 0;
+                }
+                /* Make the buttons smaller */
+                [data-testid='stFileUploader'] button {
+                    padding: 2px 8px !important;
+                    font-size: 12px !important;
+                }
+            </style>
+        ''', unsafe_allow_html=True)
         
         for idx, sku in enumerate(unique_skus):
             with col1 if idx % 3 == 0 else col2 if idx % 3 == 1 else col3:
                 uploaded_file = st.file_uploader(
-                    f"📸 {sku}",  # Shorter label with icon
+                    " ",  # Empty label since we're using caption above
                     type=["png", "jpg", "jpeg"],
                     key=f"uploader_{order_num}_{sku}",
                     label_visibility="collapsed"
