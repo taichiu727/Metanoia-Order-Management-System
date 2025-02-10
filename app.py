@@ -1168,6 +1168,11 @@ def download_shipping_document(access_token, client_id, client_secret, shop_id, 
         }
         response = requests.post(url, params=params, json=body, headers=headers)
         
+        # Add debug print statements
+        #st.write(f"Response Status Code: {response.status_code}")
+        #st.write("Response Headers:", response.headers)
+        #st.write("Response Content:", response.text)
+        
         if response.status_code != 200:
             st.error(f"HTTP Error {response.status_code}: {response.text}")
             return None
@@ -1198,6 +1203,8 @@ def download_shipping_document(access_token, client_id, client_secret, shop_id, 
             
     except Exception as e:
         st.error(f"Error downloading shipping document: {str(e)}")
+        import traceback
+        st.error(traceback.format_exc())
         return None
 
 
