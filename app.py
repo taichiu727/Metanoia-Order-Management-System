@@ -769,6 +769,8 @@ def fetch_and_process_orders(token, db):
                     )
                     item_sku = item.get("item_sku", "")
                     reference_image = reference_images.get(item_sku, "")
+                    if reference_image:
+                        reference_image = f"data:image/jpeg;base64,{reference_image}"
                     orders_data.append({
                         "Order Number": order_detail["order_sn"],
                         "Created": datetime.fromtimestamp(order_detail["create_time"]).strftime("%Y-%m-%d %H:%M"),
@@ -1487,13 +1489,12 @@ def order_editor(order_data, order_num, filtered_df, db):
         # Add Reference Images to display data
         display_data = order_data.copy()
         def format_reference_image(sku):
-            base64_data = st.session_state.reference_images.get(sku)
-            if base64_data:
-                # Debug: Print the first few characters of the base64 data
-                st.write(f"Debug - Base64 data for {sku} starts with: {base64_data[:50]}")
-                return base64_data  # Try without data URL prefix
+            if sku in st.session_state.reference_images and st.session_state.reference_images[sku]:
+                base64_data = st.session_state.reference_images[sku]
+                return f"data:image/jpeg;base64,{base64_data}"
             return None
 
+        # Add Reference Image column
         display_data["Reference Image"] = display_data["Item Number"].apply(format_reference_image)
         
         # Debug: Show what data we're passing to the editor
