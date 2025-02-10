@@ -2202,25 +2202,18 @@ def main():
                         st.query_params.page = current_page - 1
 
                 with col2:
-                    # Ensure page options always include the current page
-                    page_options = list(range(max(1, current_page - 5), 
-                                              min(total_pages + 1, current_page + 6)))
-                    
-                    # Fallback if page_options is empty
-                    if not page_options:
-                        page_options = [current_page]
-                    
-                    # Use a select slider to choose page
-                    selected_page = st.select_slider(
-                        "Select Page", 
-                        options=page_options,
+                    # Custom page selection
+                    page_input = st.number_input(
+                        "Go to Page", 
+                        min_value=1, 
+                        max_value=total_pages, 
                         value=current_page,
-                        key=f"order_page_selector_{total_pages}_{current_page}"
+                        key="page_input"
                     )
                     
                     # Update query params if page changes
-                    if selected_page != current_page:
-                        st.query_params.page = selected_page
+                    if page_input != current_page:
+                        st.query_params.page = page_input
                 
                     # Display current page and total orders
                     st.write(f"Page {current_page} of {total_pages}")
