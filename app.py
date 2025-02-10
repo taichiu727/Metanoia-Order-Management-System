@@ -942,10 +942,10 @@ def get_shipping_parameter(access_token, client_id, client_secret, shop_id, orde
     
     try:
         response = requests.get(url, params=params)
-        st.write("DEBUG - Response Status:", response.status_code)
+        
         
         response_data = response.json()
-        st.write("DEBUG - Full Response:", response_data)
+       
         
         if response.status_code == 200:
             if "error" not in response_data or not response_data.get("error"):
@@ -990,7 +990,7 @@ def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
         }
     }
     
-    st.write("DEBUG - Final shipping request:", shipping_request)
+   
 
     # Make shipping request
     params = {
@@ -1017,7 +1017,7 @@ def ship_order(access_token, client_id, client_secret, shop_id, order_sn):
     try:
         response = requests.post(url, params=params, json=shipping_request)
         response_data = response.json()
-        st.write("DEBUG - Shipping response:", response_data)
+        #st.write("DEBUG - Shipping response:", response_data)
         
         if response.status_code == 200:
             if "error" not in response_data or response_data.get("error") == "":
@@ -1488,6 +1488,7 @@ def order_editor(order_data, order_num, filtered_df, db):
 
         # Add Reference Images to display data
         display_data = order_data.copy()
+        # Format reference images with data URL
         def format_reference_image(sku):
             if sku in st.session_state.reference_images and st.session_state.reference_images[sku]:
                 base64_data = st.session_state.reference_images[sku]
@@ -1497,8 +1498,8 @@ def order_editor(order_data, order_num, filtered_df, db):
         # Add Reference Image column
         display_data["Reference Image"] = display_data["Item Number"].apply(format_reference_image)
         
-        # Debug: Show what data we're passing to the editor
-        st.write("Debug - First row Reference Image data:", display_data["Reference Image"].iloc[0][:100] if not display_data.empty else "No data")
+       
+        
         
         display_data = display_data[["Order Number", "Created", "Deadline", "Product", 
                                    "Item Spec", "Item Number", "Quantity", "Image", 
