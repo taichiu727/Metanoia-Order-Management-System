@@ -2106,25 +2106,6 @@ def products_page():
         # Display table with pagination
         products_table(df, db)
 
-def paginate_orders(df, page_size=30, current_page=1):
-    """
-    Paginate the orders DataFrame with robust handling
-    """
-    # Ensure inputs are valid
-    total_orders = len(df)
-    total_pages = max(1, (total_orders + page_size - 1) // page_size)
-    
-    # Validate current_page
-    current_page = max(1, min(current_page, total_pages))
-    
-    # Calculate exact start and end indices
-    start_idx = (current_page - 1) * page_size
-    end_idx = start_idx + page_size
-    
-    # Slice the DataFrame precisely
-    paginated_df = df.iloc[start_idx:end_idx].copy()
-    
-    return paginated_df, total_pages, total_orders
 
 def main():
     st.set_page_config(page_title="Order Management", layout="wide")
@@ -2165,74 +2146,18 @@ def main():
     
     with tabs[0]:
         if active_tab == "Orders":
-            # Get page from query params, default to 1
-            current_page = int(st.query_params.get("page", 1))
-            st.session_state.current_order_page = current_page
-
             if st.session_state.orders_need_refresh:
                 st.session_state.orders_df = fetch_and_process_orders(token, db)
                 st.session_state.orders_need_refresh = False
-                # Reset pagination when refreshing orders
-                current_page = 1
-                st.session_state.current_order_page = 1
 
             if not st.session_state.orders_df.empty:
-                # Apply filters
                 filtered_df = apply_filters(
                     st.session_state.orders_df, 
                     st.session_state.get('status_filter', 'All'),
                     st.session_state.get('show_preorders', False)
                 )
-
-                # Paginate orders
-                page_size = 30
-                paginated_df, total_pages, total_orders = paginate_orders(
-                    filtered_df, 
-                    page_size=page_size, 
-                    current_page=current_page
-                )
                 
-                # Pagination controls
-                col1, col2, col3 = st.columns([1,2,1])
-                
-                with col1:
-                    if st.button("⬅️ Previous", 
-                                 disabled=current_page == 1):
-                        # Update query params to change page
-                        st.query_params.page = current_page - 1
-
-                with col2:
-                    # Custom page selection
-                    page_input = st.number_input(
-                        "Go to Page", 
-                        min_value=1, 
-                        max_value=total_pages, 
-                        value=current_page,
-                        key="page_input"
-                    )
-                    
-                    # Update query params if page changes
-                    if page_input != current_page:
-                        st.query_params.page = page_input
-                
-                    # Display current page and total orders
-                    st.write(f"Page {current_page} of {total_pages}")
-                    st.write(f"Total Orders: {total_orders}")
-                
-                with col3:
-                    if st.button("Next ➡️", 
-                                 disabled=current_page >= total_pages):
-                        # Update query params to change page
-                        st.query_params.page = current_page + 1
-                
-                # Use fragment to prevent full page reload on edits
-                @st.fragment
-                def render_orders_table():
-                    edited_df = orders_table(paginated_df)
-                    return edited_df
-
-                edited_df = render_orders_table()
-                
+                edited_df = orders_table(filtered_df)
                 statistics_view(edited_df)
                 
                 st.divider()
