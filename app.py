@@ -1497,6 +1497,36 @@ def order_editor(order_data, order_num, filtered_df, db):
             disabled=["Order Number", "Created", "Deadline", "Product", 
                      "Item Spec", "Item Number", "Quantity", "Image"]
         )
+
+        # Add image upload section for each unique SKU
+        st.write("Reference Images:")
+        unique_skus = display_data["Item Number"].unique()
+        cols = st.columns(min(3, len(unique_skus)))  # Show up to 3 columns
+
+        for idx, sku in enumerate(unique_skus):
+            with cols[idx % 3]:
+                # Show current image if exists
+                current_image = st.session_state.reference_images.get(sku)
+                if current_image:
+                    st.image(f"data:image/jpeg;base64,{current_image}", caption=f"Current image for {sku}")
+                
+                # Add upload button
+                uploaded_file = st.file_uploader(
+                    f"Upload image for {sku}",
+                    type=["png", "jpg", "jpeg"],
+                    key=f"uploader_{order_num}_{sku}"
+                )
+                
+                if uploaded_file:
+                    processed_image = process_image(uploaded_file)
+                    if processed_image:
+                        # Save to database
+                        db.save_product_image(sku, processed_image)
+                        # Update session state
+                        st.session_state.reference_images[sku] = processed_image
+                        # Show success message
+                        st.success(f"Image updated for {sku}")
+                       
         
         if editor_key in st.session_state and "edited_rows" in st.session_state[editor_key]:
             edited_rows = st.session_state[editor_key]["edited_rows"]
