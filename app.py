@@ -1243,11 +1243,10 @@ def get_column_config():
         "Item Number": st.column_config.TextColumn("Item Number", width="small"),
         "Quantity": st.column_config.NumberColumn("Quantity", width="small"),
         "Image": st.column_config.ImageColumn("Image", width="small"),
-        "Reference Image": st.column_config.FileUploader(  # Change to FileUploader for image upload
+        "Reference Image": st.column_config.Column(  # Use base Column type for image upload
             "Reference Image",
             width="small",
-            help="Upload a reference image of the actual product (max 800x800px, 500KB)",
-            type=["png", "jpg", "jpeg"]
+            help="Upload a reference image of the actual product (max 800x800px, 500KB)"
         ),
         "Tag": st.column_config.TextColumn("Tag", width="small", required=False),
         "Received": st.column_config.CheckboxColumn("Received", width="small", default=False),
