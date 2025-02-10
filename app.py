@@ -1234,6 +1234,18 @@ def sidebar_controls():
             st.session_state.clear()
             st.rerun()
 
+def apply_quantity_styling():
+    """Add custom CSS to highlight cells with quantity > 1"""
+    st.markdown("""
+    <style>
+    /* Target quantity cells with value > 1 */
+    [data-testid='stDataEditor'] [role='gridcell']:has(div[data-testid='stCellValue'] div[data-testid='stCellValue']:text-matches('^[2-9]\d*$')) {
+        background-color: #FFFF00 !important;
+        font-weight: bold;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
 @st.cache_data
 def get_column_config():
     return {
@@ -1243,13 +1255,7 @@ def get_column_config():
         "Product": st.column_config.TextColumn("Product", width="medium"),
         "Item Spec": st.column_config.TextColumn("Item Spec", width="small"),
         "Item Number": st.column_config.TextColumn("Item Number", width="small"),
-        "Quantity": st.column_config.NumberColumn(
-            "Quantity", 
-            width="small",
-            help="Highlighted in yellow if quantity > 1",
-            format="%d",
-            color=lambda x: "white" if x <= 1 else "rgb(255, 255, 0)"  # Yellow for quantities > 1
-        ),
+        "Quantity": st.column_config.NumberColumn("Quantity", width="small"),
         "Image": st.column_config.ImageColumn("Image", width="small"),
         "Reference Image": st.column_config.ImageColumn(
             "Reference Image",
@@ -1515,6 +1521,7 @@ def order_editor(order_data, order_num, filtered_df, db):
         #                        "Item Spec", "Item Number", "Quantity", "Image", 
          #                       "Reference Image", "Received", "Missing", "Note", "Tag"]]
         
+        apply_quantity_styling()
         edited_df = st.data_editor(
             display_data,
             column_config=get_column_config(),
