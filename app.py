@@ -1572,7 +1572,7 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
                 uploaded_file = st.file_uploader(
                     " ",  # Empty label since we're using caption above
                     type=["png", "jpg", "jpeg"],
-                    key=f"uploader_{order_num}_{sku}",
+                    key=f"{unique_key}_uploader_{sku}",
                     label_visibility="collapsed"
                 )
                 
