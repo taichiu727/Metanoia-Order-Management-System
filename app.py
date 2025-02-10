@@ -1693,8 +1693,10 @@ def orders_table(filtered_df):
             # Display summary
             st.write(f"Showing orders {start_idx + 1} - {end_idx} of {total_orders}")
             
-            # Group and display orders within this section
+            # Group orders within this section
             orders = section_df.groupby('Order Number')
+            
+            # Ensure we process all orders in this section
             for idx, (order_num, order_data) in enumerate(orders):
                 # Create a truly unique key by combining section, order index, and order number
                 unique_order_editor_key = f"section_{section_idx}_orderidx_{idx}_order_{order_num}"
@@ -1709,6 +1711,10 @@ def orders_table(filtered_df):
                     )
                 except Exception as e:
                     st.error(f"Error rendering order {order_num}: {str(e)}")
+            
+            # If fewer than 50 orders are shown, display a message
+            if len(orders) < 50:
+                st.info(f"Total orders in this section: {len(orders)}")
     
     return filtered_df
 
