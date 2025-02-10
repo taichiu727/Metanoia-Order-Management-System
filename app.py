@@ -1549,6 +1549,7 @@ def order_editor(order_data, order_num, filtered_df, db):
         
         for idx, sku in enumerate(unique_skus):
             with col1 if idx % 3 == 0 else col2 if idx % 3 == 1 else col3:
+                st.caption(f"SKU: {sku}") 
                 uploaded_file = st.file_uploader(
                     " ",  # Empty label since we're using caption above
                     type=["png", "jpg", "jpeg"],
