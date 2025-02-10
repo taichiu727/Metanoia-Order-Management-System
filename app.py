@@ -454,7 +454,7 @@ def get_orders(access_token, client_id, client_secret, shop_id):
     retry_delay = 1
     
     end_time = int(time.time())
-    total_days = 30
+    total_days = 40
     window_size = 15
     
     time_windows = []
@@ -1509,8 +1509,20 @@ def order_editor(order_data, order_num, filtered_df, db):
         #                        "Item Spec", "Item Number", "Quantity", "Image", 
          #                       "Reference Image", "Received", "Missing", "Note", "Tag"]]
         
+        def highlight_quantity(df):
+            """
+            Highlight cells with quantity > 1 in yellow
+            """
+            def color_quantity(val):
+                return 'background-color: yellow' if val > 1 else ''
+            
+            return df.style.applymap(color_quantity, subset=['Quantity'])
+
+        # In your order_editor function, modify the data editor creation
+        display_data_styled = highlight_quantity(display_data)
+       
         edited_df = st.data_editor(
-            display_data,
+            display_data_styled,
             column_config=get_column_config(),
             use_container_width=True,
             key=editor_key,
