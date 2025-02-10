@@ -1518,12 +1518,12 @@ def order_editor(order_data, order_num, filtered_df, db):
             disabled=["Order Number", "Created", "Deadline", "Product", 
                      "Item Spec", "Item Number", "Quantity", "Image"]
         )
-
+        """
         # Add file uploaders for each unique SKU
         unique_skus = display_data["Item Number"].unique()
         col1, col2, col3 = st.columns(3)
 
-        """
+        
         for idx, sku in enumerate(unique_skus):
             with col1 if idx % 3 == 0 else col2 if idx % 3 == 1 else col3:
                 uploaded_file = st.file_uploader(
