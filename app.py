@@ -120,17 +120,6 @@ class OrderDatabase:
                 )
             """)
             self.cursor.execute("""
-                CREATE TABLE IF NOT EXISTS shopify_order_tracking (
-                    order_sn VARCHAR(50),
-                    product_name TEXT,
-                    variant_title TEXT,
-                    received BOOLEAN DEFAULT FALSE,
-                    missing_count INTEGER DEFAULT 0,
-                    note TEXT,
-                    last_
-                )
-            """)
-            self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS product_tags (
                     item_sku VARCHAR(100),
                     tag_name TEXT,
