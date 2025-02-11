@@ -212,9 +212,9 @@ class OrderDatabase:
             self.connect()
             self.cursor.execute("""
                 SELECT 
-                    order_sn,
+                    order_id as order_sn,  -- Alias to match Shopee format
                     product_name,
-                    variant_title as item_spec,
+                    variant_title as item_spec,  -- Alias to match Shopee format
                     received,
                     missing_count,
                     note
@@ -1421,25 +1421,25 @@ def fetch_and_process_shopify_orders(credentials, db):
 
     
 def upsert_shopify_order_tracking(self, order_sn, product_name, variant_title, received, missing_count, note):
-    """Update or insert Shopify order tracking record"""
-    try:
-        self.connect()
-        self.cursor.execute("""
-            INSERT INTO shopify_order_tracking (
-                order_sn, product_name, variant_title, received, missing_count, note, last_updated
-            )
-            VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-            ON CONFLICT (order_sn, product_name, variant_title) 
-            DO UPDATE SET 
-                received = EXCLUDED.received,
-                missing_count = EXCLUDED.missing_count,
-                note = EXCLUDED.note,
-                last_updated = CURRENT_TIMESTAMP
-        """, (order_sn, product_name, variant_title, received, missing_count, note))
-        self.conn.commit()
-    finally:
-        self.close()
-
+        """Update or insert Shopify order tracking record"""
+        try:
+            self.connect()
+            self.cursor.execute("""
+                INSERT INTO shopify_order_tracking (
+                    order_id, product_name, variant_title, received, missing_count, note, last_updated
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT (order_id, product_name, variant_title) 
+                DO UPDATE SET 
+                    received = EXCLUDED.received,
+                    missing_count = EXCLUDED.missing_count,
+                    note = EXCLUDED.note,
+                    last_updated = CURRENT_TIMESTAMP
+            """, (order_sn, product_name, variant_title, received, missing_count, note))
+            self.conn.commit()
+        finally:
+            self.close()
+    
 def batch_upsert_shopify_order_tracking(self, records):
     """Batch update or insert Shopify order tracking records"""
     try:
@@ -1447,10 +1447,10 @@ def batch_upsert_shopify_order_tracking(self, records):
         with self.conn:
             self.cursor.executemany("""
                 INSERT INTO shopify_order_tracking (
-                    order_sn, product_name, variant_title, received, missing_count, note, last_updated
+                    order_id, product_name, variant_title, received, missing_count, note, last_updated
                 )
                 VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                ON CONFLICT (order_sn, product_name, variant_title) 
+                ON CONFLICT (order_id, product_name, variant_title) 
                 DO UPDATE SET 
                     received = EXCLUDED.received,
                     missing_count = EXCLUDED.missing_count,
