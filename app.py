@@ -374,6 +374,45 @@ class OrderDatabase:
             return {row['item_sku']: row['image_data'] for row in self.cursor.fetchall()}
         finally:
             self.close()
+    def upsert_shopify_order_tracking(self, order_sn, product_name, variant_title, received, missing_count, note):
+        """Update or insert Shopify order tracking record"""
+        try:
+            self.connect()
+            self.cursor.execute("""
+                INSERT INTO shopify_order_tracking (
+                    order_id, product_name, variant_title, received, missing_count, note, last_updated
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT (order_id, product_name, variant_title) 
+                DO UPDATE SET 
+                    received = EXCLUDED.received,
+                    missing_count = EXCLUDED.missing_count,
+                    note = EXCLUDED.note,
+                    last_updated = CURRENT_TIMESTAMP
+            """, (order_sn, product_name, variant_title, received, missing_count, note))
+            self.conn.commit()
+        finally:
+            self.close()
+    
+    def batch_upsert_shopify_order_tracking(self, records):
+        """Batch update or insert Shopify order tracking records"""
+        try:
+            self.connect()
+            with self.conn:
+                self.cursor.executemany("""
+                    INSERT INTO shopify_order_tracking (
+                        order_id, product_name, variant_title, received, missing_count, note, last_updated
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (order_id, product_name, variant_title) 
+                    DO UPDATE SET 
+                        received = EXCLUDED.received,
+                        missing_count = EXCLUDED.missing_count,
+                        note = EXCLUDED.note,
+                        last_updated = CURRENT_TIMESTAMP
+                """, records)
+        finally:
+            self.close()
     
 
 def process_image(uploaded_file):
@@ -1419,49 +1458,127 @@ def fetch_and_process_shopify_orders(credentials, db):
         return df
 
 
+@st.fragment
+def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None):
+    """Fragment for individual Shopify order editing"""
+    all_received = all(order_data['Received'])
+    status_emoji = "✅" if all_received else "⚠️" if any(order_data['Received']) else "❌"
     
-def upsert_shopify_order_tracking(self, order_sn, product_name, variant_title, received, missing_count, note):
-        """Update or insert Shopify order tracking record"""
-        try:
-            self.connect()
-            self.cursor.execute("""
-                INSERT INTO shopify_order_tracking (
-                    order_id, product_name, variant_title, received, missing_count, note, last_updated
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                ON CONFLICT (order_id, product_name, variant_title) 
-                DO UPDATE SET 
-                    received = EXCLUDED.received,
-                    missing_count = EXCLUDED.missing_count,
-                    note = EXCLUDED.note,
-                    last_updated = CURRENT_TIMESTAMP
-            """, (order_sn, product_name, variant_title, received, missing_count, note))
-            self.conn.commit()
-        finally:
-            self.close()
-    
-def batch_upsert_shopify_order_tracking(self, records):
-    """Batch update or insert Shopify order tracking records"""
-    try:
-        self.connect()
-        with self.conn:
-            self.cursor.executemany("""
-                INSERT INTO shopify_order_tracking (
-                    order_id, product_name, variant_title, received, missing_count, note, last_updated
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                ON CONFLICT (order_id, product_name, variant_title) 
-                DO UPDATE SET 
-                    received = EXCLUDED.received,
-                    missing_count = EXCLUDED.missing_count,
-                    note = EXCLUDED.note,
-                    last_updated = CURRENT_TIMESTAMP
-            """, records)
-    finally:
-        self.close()
+    with st.expander(f"Order: {order_num} {status_emoji}", expanded=True):
+        # Show order details
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write(f"Customer: {order_data['Customer'].iloc[0]}")
+        with col2:
+            st.write(f"Created: {order_data['Created'].iloc[0]}")
+        
+        st.write(f"Shipping Address: {order_data['Shipping Address'].iloc[0]}")
+        
+        # Create order editor
+        editor_key = f"shopify_editor_{unique_key}"
+        edited_df = st.data_editor(
+            order_data[["Order Number", "Created", "Deadline", "Product", 
+                       "Item Spec", "Item Number", "Quantity", "Image",
+                       "Received", "Missing", "Note"]],
+            column_config=get_column_config(),
+            key=editor_key,
+            use_container_width=True,
+            num_rows="fixed",
+            disabled=["Order Number", "Created", "Deadline", "Product", 
+                     "Item Spec", "Item Number", "Quantity", "Image"]
+        )
+        
+        # Handle changes
+        if editor_key in st.session_state and "edited_rows" in st.session_state[editor_key]:
+            edited_rows = st.session_state[editor_key]["edited_rows"]
+            if edited_rows:
+                changes = []
+                for idx_str, changes_dict in edited_rows.items():
+                    idx = int(idx_str)
+                    row = edited_df.iloc[idx]
+                    received = changes_dict.get("Received", row["Received"])
+                    missing = changes_dict.get("Missing", row["Missing"])
+                    note = changes_dict.get("Note", row["Note"])
+                    
+                    changes.append((
+                        str(row["Order Number"]),
+                        str(row["Product"]),
+                        str(row["Item Spec"]),
+                        bool(received),
+                        int(missing) if pd.notna(missing) else 0,
+                        str(note) if pd.notna(note) else ""
+                    ))
+                
+                if changes:
+                    db.batch_upsert_shopify_order_tracking(changes)
+                    st.toast("✅ Changes saved!")
+                    
+                    # Update the main DataFrame
+                    for order_sn, product, item_spec, received, missing, note in changes:
+                        mask = (
+                            (filtered_df["Order Number"] == order_sn) &
+                            (filtered_df["Product"] == product) &
+                            (filtered_df["Item Spec"] == item_spec)
+                        )
+                        filtered_df.loc[mask, "Received"] = received
+                        filtered_df.loc[mask, "Missing"] = missing
+                        filtered_df.loc[mask, "Note"] = note
 
+@st.fragment
+def shopify_orders_table(filtered_df):
+    """Fragment for displaying Shopify orders table"""
+    if filtered_df.empty:
+        return filtered_df
+
+    db = OrderDatabase()
+    
+    # Sort orders from oldest to newest
+    filtered_df = filtered_df.sort_values('Created', ascending=True)
+    
+    # Calculate total sections
+    total_orders = len(filtered_df['Order Number'].unique())
+    total_sections = (total_orders + 49) // 50  # Ceiling division
+    
+    # Create tabs for each section
+    section_tabs = st.tabs([f"Section {i+1}" for i in range(total_sections)])
+    
+    for section_idx in range(total_sections):
+        with section_tabs[section_idx]:
+            # Calculate slice for this section
+            start_idx = section_idx * 50
+            end_idx = min((section_idx + 1) * 50, total_orders)
+            
+            # Get unique order numbers for this section
+            section_order_numbers = filtered_df['Order Number'].unique()[start_idx:end_idx]
+            
+            # Filter DataFrame to include only orders in this section
+            section_df = filtered_df[filtered_df['Order Number'].isin(section_order_numbers)]
+            
+            # Display summary
+            st.write(f"Showing orders {start_idx + 1} - {end_idx} of {total_orders}")
+            
+            # Process each unique order
+            for idx, order_num in enumerate(section_order_numbers):
+                order_data = section_df[section_df['Order Number'] == order_num]
+                unique_key = f"section_{section_idx}_orderidx_{idx}_order_{order_num}"
+                
+                try:
+                    shopify_order_editor(
+                        order_data, 
+                        order_num, 
+                        section_df, 
+                        db, 
+                        unique_key=unique_key
+                    )
+                except Exception as e:
+                    st.error(f"Error rendering order {order_num}: {str(e)}")
+    
+    return filtered_df    
+
+
+@st.fragment
 def handle_shopify_orders():
-    """Handle the Shopify orders tab content"""
+    """Fragment for handling Shopify orders tab content"""
     st.header("Shopify Orders")
     
     if not st.session_state.shopify_authenticated:
@@ -1482,6 +1599,7 @@ def handle_shopify_orders():
     with col1:
         if st.button("🔄 Refresh Orders", key="refresh_shopify"):
             st.session_state.shopify_orders_need_refresh = True
+            st.rerun()
     
     # Fetch and display orders
     if st.session_state.shopify_orders_need_refresh:
@@ -1501,75 +1619,12 @@ def handle_shopify_orders():
         if status_filter != "All":
             filtered_df = filtered_df[filtered_df["Financial Status"] == status_filter]
         
-        # Display orders using the same table format as Shopee
-        st.write(f"Showing {len(filtered_df)} orders")
+        # Display orders using fragments
+        edited_df = shopify_orders_table(filtered_df)
         
-        # Group orders by order number
-        for order_num in filtered_df["Order Number"].unique():
-            order_data = filtered_df[filtered_df["Order Number"] == order_num]
-            
-            # Create a unique key for this order
-            unique_key = f"shopify_order_{order_num}"
-            
-            with st.expander(f"Order: {order_num}", expanded=True):
-                # Show order details
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.write(f"Customer: {order_data['Customer'].iloc[0]}")
-                with col2:
-                    st.write(f"Created: {order_data['Created'].iloc[0]}")
-                
-                st.write(f"Shipping Address: {order_data['Shipping Address'].iloc[0]}")
-                
-                # Create order editor
-                editor_key = f"shopify_editor_{unique_key}"
-                edited_df = st.data_editor(
-                    order_data[["Order Number", "Created", "Deadline", "Product", 
-                               "Item Spec", "Item Number", "Quantity", "Image",
-                               "Received", "Missing", "Note"]],
-                    column_config=get_column_config(),
-                    key=editor_key,
-                    use_container_width=True,
-                    num_rows="fixed",
-                    disabled=["Order Number", "Created", "Deadline", "Product", 
-                            "Item Spec", "Item Number", "Quantity", "Image"]
-                )
-                
-                # Handle changes
-                if editor_key in st.session_state and "edited_rows" in st.session_state[editor_key]:
-                    edited_rows = st.session_state[editor_key]["edited_rows"]
-                    if edited_rows:
-                        changes = []
-                        for idx_str, changes_dict in edited_rows.items():
-                            idx = int(idx_str)
-                            row = edited_df.iloc[idx]
-                            received = changes_dict.get("Received", row["Received"])
-                            missing = changes_dict.get("Missing", row["Missing"])
-                            note = changes_dict.get("Note", row["Note"])
-                            
-                            changes.append((
-                                str(row["Order Number"]),
-                                str(row["Product"]),
-                                str(row["Item Spec"]),
-                                bool(received),
-                                int(missing) if pd.notna(missing) else 0,
-                                str(note) if pd.notna(note) else ""
-                            ))
-                        
-                        if changes:
-                            db.batch_upsert_shopify_order_tracking(changes)
-                            st.toast("✅ Changes saved!")
-                            
-                            # Update the main DataFrame
-                            for order_sn, product, item_spec, received, missing, note in changes:
-                                mask = (
-                                    (st.session_state.shopify_orders_df["Order Number"] == order_sn) &
-                                    (st.session_state.shopify_orders_df["Product"] == product) &
-                                    (st.session_state.shopify_orders_df["Item Spec"] == item_spec)
-                                )
-                                st.session_state.shopify_orders_df.loc[mask, "Received"] = received
-                                st.session_state.shopify_orders_df.loc[mask, "Missing"] = missing
-                                st.session_state.shopify_orders_df.loc[mask, "Note"] = note
+        # Add export controls
+        st.divider()
+        export_controls(edited_df)
     else:
         st.info("No unfulfilled orders found.")
 
