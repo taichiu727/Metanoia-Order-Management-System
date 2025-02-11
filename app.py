@@ -1549,7 +1549,7 @@ def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None
         
         edited_df = st.data_editor(
             order_data[display_columns],
-            column_config=get_shopify_column_config(),
+            column_config=get_column_config_shopify(),
             key=editor_key,
             use_container_width=True,
             num_rows="fixed",
