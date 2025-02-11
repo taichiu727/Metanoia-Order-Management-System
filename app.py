@@ -1343,6 +1343,14 @@ def process_shopify_orders(orders):
     for order in orders:
         # Process each line item in the order
         for item in order.get('line_items', []):
+            # Debug print to check item data
+            st.write("Item data:")
+            st.write({
+                'title': item['title'],
+                'sku': item.get('sku', ''),
+                'image_url': item.get('image_url', '')
+            })
+            
             orders_data.append({
                 "Order Number": order['order_number'],
                 "Created": datetime.strptime(order['created_at'], "%Y-%m-%dT%H:%M:%S%z").strftime("%Y-%m-%d %H:%M"),
@@ -1361,7 +1369,13 @@ def process_shopify_orders(orders):
                 "Shipping Address": format_shipping_address(order.get('shipping_address', {}))
             })
     
-    return pd.DataFrame(orders_data)
+    df = pd.DataFrame(orders_data)
+    
+    # Debug print to check DataFrame
+    st.write("DataFrame image URLs:")
+    st.write(df[['Product', 'Image']].head())
+    
+    return df
 
 def format_shipping_address(address):
     """Format shipping address into a readable string"""
@@ -1387,7 +1401,6 @@ def get_shopify_orders(shop_url, access_token, status="unfulfilled", limit=250):
     # Base URL for Shopify API
     base_url = f"https://{shop_url}/admin/api/2024-01/orders.json"
     
-    # Initial parameters
     params = {
         'status': 'open',
         'fulfillment_status': status,
@@ -1398,60 +1411,39 @@ def get_shopify_orders(shop_url, access_token, status="unfulfilled", limit=250):
     headers = {'X-Shopify-Access-Token': access_token}
     
     try:
-        while True:
-            response = requests.get(base_url, params=params, headers=headers)
-            response.raise_for_status()
-            
-            data = response.json()
-            orders = data.get('orders', [])
-            
-            if not orders:
-                break
-            
-            # Get product details for each order
-            for order in orders:
-                for item in order.get('line_items', []):
-                    if 'product_id' in item:
-                        # Fetch product details to get images
-                        product_url = f"https://{shop_url}/admin/api/2024-01/products/{item['product_id']}.json"
-                        product_response = requests.get(product_url, headers=headers)
-                        if product_response.status_code == 200:
-                            product_data = product_response.json().get('product', {})
-                            
-                            # Find matching variant to get image
-                            for variant in product_data.get('variants', []):
-                                if str(variant.get('id')) == str(item.get('variant_id')):
-                                    item['sku'] = variant.get('sku', '')
-                                    # Try to find variant-specific image
-                                    variant_image_id = variant.get('image_id')
-                                    if variant_image_id:
-                                        for image in product_data.get('images', []):
-                                            if str(image.get('id')) == str(variant_image_id):
-                                                item['image_url'] = image.get('src', '')
-                                                break
-                                    break
-                            
-                            # If no variant-specific image, use main product image
-                            if 'image_url' not in item and product_data.get('images'):
-                                item['image_url'] = product_data['images'][0].get('src', '')
-                                # Add image size parameters for Shopify CDN
-                                if item['image_url']:
-                                    item['image_url'] = item['image_url'].split('?')[0] + '?width=100&height=100'
+        response = requests.get(base_url, params=params, headers=headers)
+        response.raise_for_status()
+        
+        data = response.json()
+        orders = data.get('orders', [])
+        
+        for order in orders:
+            # Get product details for images
+            for item in order.get('line_items', []):
+                if 'product_id' in item:
+                    product_url = f"https://{shop_url}/admin/api/2024-01/products/{item['product_id']}.json"
+                    st.write(f"Fetching product details for ID: {item['product_id']}")
+                    
+                    product_response = requests.get(product_url, headers=headers)
+                    if product_response.status_code == 200:
+                        product_data = product_response.json().get('product', {})
                         
-                        time.sleep(0.5)  # Rate limiting for product API calls
-                
-            all_orders.extend(orders)
+                        # Debug print product data
+                        st.write("Product data:")
+                        st.write({
+                            'title': product_data.get('title'),
+                            'images': [img.get('src') for img in product_data.get('images', [])]
+                        })
+                        
+                        if product_data.get('images'):
+                            image_url = product_data['images'][0].get('src', '')
+                            if image_url:
+                                item['image_url'] = image_url
+                                st.write(f"Found image URL: {image_url}")
+                    
+                    time.sleep(0.5)
             
-            # Check for next page
-            link_header = response.headers.get('Link', '')
-            if 'rel="next"' not in link_header:
-                break
-                
-            # Update params for next page
-            params['page_info'] = link_header.split('page_info=')[1].split('>')[0]
-            
-            time.sleep(0.5)  # Rate limiting
-            
+        all_orders.extend(orders)
         return all_orders
         
     except requests.exceptions.RequestException as e:
