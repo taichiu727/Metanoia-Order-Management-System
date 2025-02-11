@@ -137,29 +137,6 @@ class OrderDatabase:
                 )
             """)
             self.cursor.execute("""
-                CREATE TABLE IF NOT EXISTS shopify_credentials (
-                    id SERIAL PRIMARY KEY,
-                    shop_url TEXT NOT NULL,
-                    access_token TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            # Add Shopify order tracking table
-            self.cursor.execute("""
-                CREATE TABLE IF NOT EXISTS shopify_order_tracking (
-                    order_id VARCHAR(50),
-                    product_name TEXT,
-                    variant_title TEXT,
-                    received BOOLEAN DEFAULT FALSE,
-                    missing_count INTEGER DEFAULT 0,
-                    note TEXT,
-                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    PRIMARY KEY (order_id, product_name, variant_title)
-                )
-            """)
-            self.cursor.execute("""
                 DO $$ 
                 BEGIN 
                     BEGIN
@@ -174,36 +151,6 @@ class OrderDatabase:
             """)
 
             self.conn.commit()
-        finally:
-            self.close()
-    
-    def save_shopify_credentials(self, shop_url, access_token):
-        """Save Shopify credentials to database"""
-        try:
-            self.connect()
-            self.cursor.execute("""
-                INSERT INTO shopify_credentials (shop_url, access_token, updated_at)
-                VALUES (%s, %s, CURRENT_TIMESTAMP)
-                ON CONFLICT (id) DO UPDATE SET
-                    shop_url = EXCLUDED.shop_url,
-                    access_token = EXCLUDED.access_token,
-                    updated_at = CURRENT_TIMESTAMP
-            """, (shop_url, access_token))
-            self.conn.commit()
-        finally:
-            self.close()
-    
-    def get_shopify_credentials(self):
-        """Get Shopify credentials from database"""
-        try:
-            self.connect()
-            self.cursor.execute("""
-                SELECT shop_url, access_token
-                FROM shopify_credentials
-                ORDER BY updated_at DESC
-                LIMIT 1
-            """)
-            return self.cursor.fetchone()
         finally:
             self.close()
     
@@ -2231,31 +2178,13 @@ def main():
     with st.sidebar:
         sidebar_controls()
     
-    main_tabs = st.tabs(["Order Management", "Products", "Settings"])
+    tabs = st.tabs(["Orders", "Products"])
 
     active_tab = st.radio("Tabs", ["Orders", "Products"], label_visibility="hidden")
     st.session_state.active_tab = active_tab
     
-    with main_tabs[0]:
-        # Platform selection tabs within Orders
-        platform_tabs = st.tabs(["Shopee Orders", "Shopify Orders"])
-        
-        with platform_tabs[0]:
-            # Existing Shopee orders implementation
-            if not auth_fragment(db):
-                return
-                
-            token = check_token_validity(db)
-            if not token:
-                st.error("Shopee token not found or invalid")
-                st.session_state.authentication_state = "initial"
-                return
-                
-            # Shopee-specific controls
-            with st.sidebar:
-                st.header("Shopee Controls")
-                sidebar_controls()
-            
+    with tabs[0]:
+        if active_tab == "Orders":
             if st.session_state.orders_need_refresh:
                 st.session_state.orders_df = fetch_and_process_orders(token, db)
                 st.session_state.orders_need_refresh = False
@@ -2273,38 +2202,12 @@ def main():
                 st.divider()
                 export_controls(edited_df)
             else:
-                st.info("No Shopee orders found in the selected time range.")
-        
-        with platform_tabs[1]:
-            # Shopify orders implementation
-            st.header("Shopify Orders")
-            if "shopify_authenticated" not in st.session_state:
-                # Add Shopify authentication here
-                st.info("Please configure your Shopify credentials in Settings")
-            else:
-                # Add Shopify orders table and controls here
-                st.info("Shopify integration coming soon!")
+                st.info("No orders found in the selected time range.")
     
-    with main_tabs[1]:
-        products_page()
-    
-    with main_tabs[2]:
-        st.header("Settings")
-        
-        # Platform Settings
-        st.subheader("Shopify Settings")
-        with st.form("shopify_settings"):
-            shop_url = st.text_input("Shop URL", 
-                placeholder="your-store.myshopify.com")
-            access_token = st.text_input("Access Token", type="password")
-            
-            if st.form_submit_button("Save Shopify Settings"):
-                # Save Shopify credentials to database
-                try:
-                    db.save_shopify_credentials(shop_url, access_token)
-                    st.success("Shopify settings saved!")
-                except Exception as e:
-                    st.error(f"Error saving Shopify settings: {str(e)}")
+    # Products tab
+    with tabs[1]:
+        if active_tab == "Products":
+            products_page()
         
 
 if __name__ == "__main__":
