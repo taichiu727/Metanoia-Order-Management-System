@@ -685,6 +685,9 @@ def initialize_session_state():
             st.session_state.authentication_state = "initial"
     
     # Initialize all required session state variables
+     # Tab management
+    if "active_tab" not in st.session_state:
+        st.session_state.active_tab = "Orders"
     if "orders" not in st.session_state:
         st.session_state.orders = []
     if "order_details" not in st.session_state:
