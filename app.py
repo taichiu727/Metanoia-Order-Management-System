@@ -2231,31 +2231,14 @@ def main():
     with st.sidebar:
         sidebar_controls()
     
+    # Main navigation tabs
     main_tabs = st.tabs(["Order Management", "Products", "Settings"])
-
-    active_tab = st.radio("Tabs", ["Orders", "Products"], label_visibility="hidden")
-    st.session_state.active_tab = active_tab
     
     with main_tabs[0]:
         # Platform selection tabs within Orders
         platform_tabs = st.tabs(["Shopee Orders", "Shopify Orders"])
         
         with platform_tabs[0]:
-            # Existing Shopee orders implementation
-            if not auth_fragment(db):
-                return
-                
-            token = check_token_validity(db)
-            if not token:
-                st.error("Shopee token not found or invalid")
-                st.session_state.authentication_state = "initial"
-                return
-                
-            # Shopee-specific controls
-            with st.sidebar:
-                st.header("Shopee Controls")
-                sidebar_controls()
-            
             if st.session_state.orders_need_refresh:
                 st.session_state.orders_df = fetch_and_process_orders(token, db)
                 st.session_state.orders_need_refresh = False
@@ -2276,7 +2259,6 @@ def main():
                 st.info("No Shopee orders found in the selected time range.")
         
         with platform_tabs[1]:
-            # Shopify orders implementation
             st.header("Shopify Orders")
             if "shopify_authenticated" not in st.session_state:
                 # Add Shopify authentication here
@@ -2287,7 +2269,7 @@ def main():
     
     with main_tabs[1]:
         products_page()
-    
+        
     with main_tabs[2]:
         st.header("Settings")
         
@@ -2303,9 +2285,20 @@ def main():
                 try:
                     db.save_shopify_credentials(shop_url, access_token)
                     st.success("Shopify settings saved!")
+                    st.session_state.shopify_authenticated = True
                 except Exception as e:
                     st.error(f"Error saving Shopify settings: {str(e)}")
         
+        # Add divider between settings sections
+        st.divider()
+        
+        # Shopee Settings
+        st.subheader("Shopee Settings")
+        if st.button("Reset Shopee Authentication"):
+            db.clear_token()
+            st.session_state.authentication_state = "initial"
+            st.rerun()
 
 if __name__ == "__main__":
     main()
+        
