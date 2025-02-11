@@ -1635,9 +1635,9 @@ def handle_shopify_orders():
         # Display orders using fragments with unique section key
         edited_df = shopify_orders_table(filtered_df, section_key="main_shopify")
         
-        # Add export controls
+        # Add export controls using Shopify-specific function
         st.divider()
-        export_controls(edited_df)
+        shopify_export_controls(edited_df)
     else:
         st.info("No unfulfilled orders found.")
 
@@ -2243,6 +2243,25 @@ def export_controls(df):
     
     with col2:
         if st.button("📋 Copy to Clipboard"):
+            df.to_clipboard(index=False)
+            st.success("Data copied to clipboard!")
+
+def shopify_export_controls(df):
+    """Fragment for Shopify export functionality"""
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("📥 Export to CSV", key="shopify_export_csv"):
+            csv = df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="Download CSV",
+                data=csv,
+                file_name=f"shopify_orders_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                key="shopify_download_csv"
+            )
+    
+    with col2:
+        if st.button("📋 Copy to Clipboard", key="shopify_copy_clipboard"):
             df.to_clipboard(index=False)
             st.success("Data copied to clipboard!")
 
