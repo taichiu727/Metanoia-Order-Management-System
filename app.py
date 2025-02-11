@@ -1474,7 +1474,6 @@ def get_column_config_shopify():
             "Image",
             width="medium",
             help="Product image",
-            output_format="auto",
             default=None
         ),
         "Received": st.column_config.CheckboxColumn(
