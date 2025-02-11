@@ -206,6 +206,23 @@ class OrderDatabase:
             return self.cursor.fetchone()
         finally:
             self.close()
+    def get_shopify_order_tracking(self):
+        """Fetch all Shopify order tracking records from the database"""
+        try:
+            self.connect()
+            self.cursor.execute("""
+                SELECT 
+                    order_sn,
+                    product_name,
+                    variant_title as item_spec,
+                    received,
+                    missing_count,
+                    note
+                FROM shopify_order_tracking
+            """)
+            return self.cursor.fetchall()
+        finally:
+            self.close()
     
     def save_token(self, token_data):
         try:
@@ -1401,23 +1418,7 @@ def fetch_and_process_shopify_orders(credentials, db):
         
         return df
 
-def get_shopify_order_tracking(self):
-        """Fetch all Shopify order tracking records from the database"""
-        try:
-            self.connect()
-            self.cursor.execute("""
-                SELECT 
-                    order_sn,
-                    product_name,
-                    variant_title as item_spec,
-                    received,
-                    missing_count,
-                    note
-                FROM shopify_order_tracking
-            """)
-            return self.cursor.fetchall()
-        finally:
-            self.close()
+
     
 def upsert_shopify_order_tracking(self, order_sn, product_name, variant_title, received, missing_count, note):
     """Update or insert Shopify order tracking record"""
