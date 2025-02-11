@@ -1346,16 +1346,16 @@ def process_shopify_orders(orders):
             orders_data.append({
                 "Order Number": order['order_number'],
                 "Created": datetime.strptime(order['created_at'], "%Y-%m-%dT%H:%M:%S%z").strftime("%Y-%m-%d %H:%M"),
-                "Deadline": (datetime.strptime(order['created_at'], "%Y-%m-%dT%H:%M:%S%z") + timedelta(days=3)).strftime("%Y-%m-%d %H:%M"),  # Example deadline
+                "Deadline": (datetime.strptime(order['created_at'], "%Y-%m-%dT%H:%M:%S%z") + timedelta(days=3)).strftime("%Y-%m-%d %H:%M"),
                 "Product": item['title'],
                 "Quantity": item['quantity'],
-                "Image": item.get('image', {}).get('src', ''),
+                "Image": item.get('image_url', ''),  # Use fetched image URL
                 "Reference Image": '',  # Can be populated later if needed
                 "Item Spec": item.get('variant_title', '') or 'Default',
-                "Item Number": item.get('sku', ''),
-                "Received": False,  # Default state
-                "Missing": 0,      # Default state
-                "Note": "",        # Default state
+                "Item Number": item.get('sku', ''),  # Use variant SKU
+                "Received": False,
+                "Missing": 0,
+                "Note": "",
                 "Financial Status": order['financial_status'],
                 "Customer": f"{order.get('customer', {}).get('first_name', '')} {order.get('customer', {}).get('last_name', '')}".strip(),
                 "Shipping Address": format_shipping_address(order.get('shipping_address', {}))
@@ -1381,13 +1381,13 @@ def format_shipping_address(address):
     return ", ".join(filter(None, address_parts))
 
 def get_shopify_orders(shop_url, access_token, status="unfulfilled", limit=250):
-    """Fetch orders from Shopify API"""
+    """Fetch orders from Shopify API with detailed line item information"""
     all_orders = []
     
     # Base URL for Shopify API
     base_url = f"https://{shop_url}/admin/api/2024-01/orders.json"
     
-    # Initial parameters
+    # Initial parameters - include line_items in the fields to get SKUs and images
     params = {
         'status': 'open',
         'fulfillment_status': status,
@@ -1407,6 +1407,26 @@ def get_shopify_orders(shop_url, access_token, status="unfulfilled", limit=250):
             
             if not orders:
                 break
+            
+            # Get product details for each order
+            for order in orders:
+                for item in order.get('line_items', []):
+                    if 'product_id' in item:
+                        # Fetch product details to get images
+                        product_url = f"https://{shop_url}/admin/api/2024-01/products/{item['product_id']}.json"
+                        product_response = requests.get(product_url, headers=headers)
+                        if product_response.status_code == 200:
+                            product_data = product_response.json().get('product', {})
+                            # Find matching variant to get image
+                            for variant in product_data.get('variants', []):
+                                if str(variant.get('id')) == str(item.get('variant_id')):
+                                    item['sku'] = variant.get('sku', '')
+                                    break
+                            # Get primary image
+                            if product_data.get('images'):
+                                item['image_url'] = product_data['images'][0].get('src', '')
+                        
+                        time.sleep(0.5)  # Rate limiting for product API calls
                 
             all_orders.extend(orders)
             
@@ -1418,8 +1438,7 @@ def get_shopify_orders(shop_url, access_token, status="unfulfilled", limit=250):
             # Update params for next page
             params['page_info'] = link_header.split('page_info=')[1].split('>')[0]
             
-            # Rate limiting - Shopify has a rate limit of 2 requests per second
-            time.sleep(0.5)
+            time.sleep(0.5)  # Rate limiting
             
         return all_orders
         
@@ -1466,20 +1485,26 @@ def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None
     
     with st.expander(f"Order: {order_num} {status_emoji}", expanded=True):
         # Show order details
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns([2, 2, 1])
         with col1:
             st.write(f"Customer: {order_data['Customer'].iloc[0]}")
         with col2:
             st.write(f"Created: {order_data['Created'].iloc[0]}")
+        with col3:
+            st.write(f"Status: {order_data['Financial Status'].iloc[0].title()}")
         
         st.write(f"Shipping Address: {order_data['Shipping Address'].iloc[0]}")
         
-        # Create order editor with unique key
+        # Create order editor
         editor_key = f"shopify_editor_{unique_key}"
+        display_columns = [
+            "Order Number", "Created", "Deadline", "Product", 
+            "Item Spec", "Item Number", "Quantity", "Image",
+            "Received", "Missing", "Note"
+        ]
+        
         edited_df = st.data_editor(
-            order_data[["Order Number", "Created", "Deadline", "Product", 
-                       "Item Spec", "Item Number", "Quantity", "Image",
-                       "Received", "Missing", "Note"]],
+            order_data[display_columns],
             column_config=get_column_config(),
             key=editor_key,
             use_container_width=True,
