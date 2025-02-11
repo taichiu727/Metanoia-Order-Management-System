@@ -1337,26 +1337,19 @@ def download_shipping_document(access_token, client_id, client_secret, shop_id, 
 
 
 def process_shopify_orders(orders):
-    """Process Shopify orders into a DataFrame format similar to Shopee orders"""
+    """Process Shopify orders into a DataFrame format"""
     orders_data = []
     
     for order in orders:
         for item in order.get('line_items', []):
-            # Add size parameters to image URL for better display
-            image_url = item.get('image_url', '')
-            if image_url:
-                # Remove any existing URL parameters
-                base_url = image_url.split('?')[0]
-                # Add specific size parameters for the data editor
-                image_url = f"{base_url}?width=100&height=100&crop=center"
-            
+            # Use the first image URL directly
             orders_data.append({
                 "Order Number": order['order_number'],
                 "Created": datetime.strptime(order['created_at'], "%Y-%m-%dT%H:%M:%S%z").strftime("%Y-%m-%d %H:%M"),
                 "Deadline": (datetime.strptime(order['created_at'], "%Y-%m-%dT%H:%M:%S%z") + timedelta(days=3)).strftime("%Y-%m-%d %H:%M"),
                 "Product": item['title'],
                 "Quantity": item['quantity'],
-                "Image": image_url,
+                "Image": item.get('image_url', ''),  # First image only
                 "Reference Image": '',
                 "Item Spec": item.get('variant_title', '') or 'Default',
                 "Item Number": item.get('sku', ''),
@@ -1388,13 +1381,12 @@ def format_shipping_address(address):
     return ", ".join(filter(None, address_parts))
 
 def get_shopify_orders(shop_url, access_token, status="unfulfilled", limit=250):
-    """Fetch orders from Shopify API with detailed line item information"""
+    """Fetch orders from Shopify API with first product image"""
     all_orders = []
     
     # Base URL for Shopify API
     base_url = f"https://{shop_url}/admin/api/2024-01/orders.json"
     
-    # Initial parameters
     params = {
         'status': 'open',
         'fulfillment_status': status,
@@ -1405,60 +1397,35 @@ def get_shopify_orders(shop_url, access_token, status="unfulfilled", limit=250):
     headers = {'X-Shopify-Access-Token': access_token}
     
     try:
-        while True:
-            response = requests.get(base_url, params=params, headers=headers)
-            response.raise_for_status()
+        response = requests.get(base_url, params=params, headers=headers)
+        response.raise_for_status()
+        
+        data = response.json()
+        orders = data.get('orders', [])
+        
+        if not orders:
+            return []
             
-            data = response.json()
-            orders = data.get('orders', [])
-            
-            if not orders:
-                break
-            
-            # Get product details for each order
-            for order in orders:
-                for item in order.get('line_items', []):
-                    if 'product_id' in item:
-                        # Fetch product details to get images
-                        product_url = f"https://{shop_url}/admin/api/2024-01/products/{item['product_id']}.json"
-                        product_response = requests.get(product_url, headers=headers)
-                        if product_response.status_code == 200:
-                            product_data = product_response.json().get('product', {})
-                            
-                            # Find matching variant to get image
-                            for variant in product_data.get('variants', []):
-                                if str(variant.get('id')) == str(item.get('variant_id')):
-                                    item['sku'] = variant.get('sku', '')
-                                    # Try to find variant-specific image
-                                    variant_image_id = variant.get('image_id')
-                                    if variant_image_id:
-                                        for image in product_data.get('images', []):
-                                            if str(image.get('id')) == str(variant_image_id):
-                                                item['image_url'] = image.get('src', '')
-                                                break
-                                    break
-                            
-                            # If no variant-specific image, use main product image
-                            if 'image_url' not in item and product_data.get('images'):
-                                item['image_url'] = product_data['images'][0].get('src', '')
-                                # Add image size parameters for Shopify CDN
-                                if item['image_url']:
-                                    item['image_url'] = item['image_url'].split('?')[0] + '?width=100&height=100'
-                        
-                        time.sleep(0.5)  # Rate limiting for product API calls
-                
-            all_orders.extend(orders)
-            
-            # Check for next page
-            link_header = response.headers.get('Link', '')
-            if 'rel="next"' not in link_header:
-                break
-                
-            # Update params for next page
-            params['page_info'] = link_header.split('page_info=')[1].split('>')[0]
-            
-            time.sleep(0.5)  # Rate limiting
-            
+        for order in orders:
+            for item in order.get('line_items', []):
+                if 'product_id' in item:
+                    # Get product details for first image
+                    product_url = f"https://{shop_url}/admin/api/2024-01/products/{item['product_id']}.json"
+                    product_response = requests.get(product_url, headers=headers)
+                    
+                    if product_response.status_code == 200:
+                        product_data = product_response.json().get('product', {})
+                        # Get just the first image
+                        if product_data.get('images'):
+                            first_image = product_data['images'][0].get('src', '')
+                            if first_image:
+                                # Add size parameters for better display
+                                base_url = first_image.split('?')[0]
+                                item['image_url'] = f"{base_url}?width=100&height=100&crop=center"
+                    
+                    time.sleep(0.5)  # Rate limiting
+        
+        all_orders.extend(orders)
         return all_orders
         
     except requests.exceptions.RequestException as e:
