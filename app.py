@@ -1527,7 +1527,7 @@ def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None
                 st.info("Fulfillment functionality coming soon!")
         
         # Handle changes
-        handle_editor_changes(editor_key, edited_df, filtered_df, db)
+        handle_shopify_editor_changes(editor_key, edited_df, filtered_df, db)
 
 @st.fragment
 def shopify_orders_table(filtered_df, section_key=""):
@@ -1640,6 +1640,43 @@ def handle_shopify_orders():
         export_controls(edited_df)
     else:
         st.info("No unfulfilled orders found.")
+
+def handle_shopify_editor_changes(editor_key, edited_df, filtered_df, db):
+    """Helper function to handle editor changes"""
+    if editor_key in st.session_state and "edited_rows" in st.session_state[editor_key]:
+        edited_rows = st.session_state[editor_key]["edited_rows"]
+        if edited_rows:
+            changes = []
+            for idx_str, changes_dict in edited_rows.items():
+                idx = int(idx_str)
+                row = edited_df.iloc[idx]
+                received = changes_dict.get("Received", row["Received"])
+                missing = changes_dict.get("Missing", row["Missing"])
+                note = changes_dict.get("Note", row["Note"])
+                
+                changes.append((
+                    str(row["Order Number"]),
+                    str(row["Product"]),
+                    str(row["Item Spec"]),
+                    bool(received),
+                    int(missing) if pd.notna(missing) else 0,
+                    str(note) if pd.notna(note) else ""
+                ))
+            
+            if changes:
+                db.batch_upsert_shopify_order_tracking(changes)
+                st.toast("✅ Changes saved!")
+                
+                # Update the main DataFrame
+                for order_sn, product, item_spec, received, missing, note in changes:
+                    mask = (
+                        (filtered_df["Order Number"] == order_sn) &
+                        (filtered_df["Product"] == product) &
+                        (filtered_df["Item Spec"] == item_spec)
+                    )
+                    filtered_df.loc[mask, "Received"] = received
+                    filtered_df.loc[mask, "Missing"] = missing
+                    filtered_df.loc[mask, "Note"] = note
 
 @st.fragment
 def sidebar_controls():
