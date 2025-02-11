@@ -1387,7 +1387,7 @@ def get_shopify_orders(shop_url, access_token, status="unfulfilled", limit=250):
     # Base URL for Shopify API
     base_url = f"https://{shop_url}/admin/api/2024-01/orders.json"
     
-    # Initial parameters - include line_items in the fields to get SKUs and images
+    # Initial parameters
     params = {
         'status': 'open',
         'fulfillment_status': status,
@@ -1417,14 +1417,26 @@ def get_shopify_orders(shop_url, access_token, status="unfulfilled", limit=250):
                         product_response = requests.get(product_url, headers=headers)
                         if product_response.status_code == 200:
                             product_data = product_response.json().get('product', {})
+                            
                             # Find matching variant to get image
                             for variant in product_data.get('variants', []):
                                 if str(variant.get('id')) == str(item.get('variant_id')):
                                     item['sku'] = variant.get('sku', '')
+                                    # Try to find variant-specific image
+                                    variant_image_id = variant.get('image_id')
+                                    if variant_image_id:
+                                        for image in product_data.get('images', []):
+                                            if str(image.get('id')) == str(variant_image_id):
+                                                item['image_url'] = image.get('src', '')
+                                                break
                                     break
-                            # Get primary image
-                            if product_data.get('images'):
+                            
+                            # If no variant-specific image, use main product image
+                            if 'image_url' not in item and product_data.get('images'):
                                 item['image_url'] = product_data['images'][0].get('src', '')
+                                # Add image size parameters for Shopify CDN
+                                if item['image_url']:
+                                    item['image_url'] = item['image_url'].split('?')[0] + '?width=100&height=100'
                         
                         time.sleep(0.5)  # Rate limiting for product API calls
                 
@@ -1445,6 +1457,31 @@ def get_shopify_orders(shop_url, access_token, status="unfulfilled", limit=250):
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching Shopify orders: {str(e)}")
         return []
+
+def get_column_config_shopify():
+    """Get column configuration specifically for Shopify orders"""
+    return {
+        "Order Number": st.column_config.TextColumn("Order Number", width="small"),
+        "Created": st.column_config.TextColumn("Created", width="small"),
+        "Deadline": st.column_config.TextColumn("Deadline", width="small"),
+        "Product": st.column_config.TextColumn("Product", width="medium"),
+        "Item Spec": st.column_config.TextColumn("Item Spec", width="small"),
+        "Item Number": st.column_config.TextColumn("Item Number", width="small"),
+        "Quantity": st.column_config.NumberColumn("Quantity", width="small"),
+        "Image": st.column_config.ImageColumn(
+            "Image",
+            width="small",
+            help="Product image"
+        ),
+        "Reference Image": st.column_config.ImageColumn(
+            "Reference Image",
+            width="small",
+            help="Reference image"
+        ),
+        "Received": st.column_config.CheckboxColumn("Received", width="small", default=False),
+        "Missing": st.column_config.NumberColumn("Missing", width="small", default=0),
+        "Note": st.column_config.TextColumn("Note", width="medium", default="")
+    }
 
 def fetch_and_process_shopify_orders(credentials, db):
     """Fetch orders from Shopify and process them into a DataFrame"""
@@ -1483,10 +1520,6 @@ def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None
     all_received = all(order_data['Received'])
     status_emoji = "✅" if all_received else "⚠️" if any(order_data['Received']) else "❌"
     
-    # Ensure unique_key is always set
-    if unique_key is None:
-        unique_key = f"shopify_order_{order_num}"
-    
     with st.expander(f"Order: {order_num} {status_emoji}", expanded=True):
         # Show order details
         col1, col2, col3 = st.columns([2, 2, 1])
@@ -1509,7 +1542,7 @@ def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None
         
         edited_df = st.data_editor(
             order_data[display_columns],
-            column_config=get_column_config(),
+            column_config=get_column_config_shopify(),
             key=editor_key,
             use_container_width=True,
             num_rows="fixed",
@@ -1517,7 +1550,7 @@ def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None
                      "Item Spec", "Item Number", "Quantity", "Image"]
         )
         
-        # Add action buttons with unique keys based on order number and unique_key
+        # Add action buttons
         col1, col2 = st.columns(2)
         with col1:
             if st.button("Print Order", key=f"print_{unique_key}"):
