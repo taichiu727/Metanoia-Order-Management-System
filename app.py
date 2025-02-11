@@ -1337,19 +1337,22 @@ def download_shipping_document(access_token, client_id, client_secret, shop_id, 
 
 
 def process_shopify_orders(orders):
-    """Process Shopify orders into a DataFrame format"""
+    """Process Shopify orders with image debugging"""
     orders_data = []
     
     for order in orders:
         for item in order.get('line_items', []):
-            # Use the first image URL directly
+            image_url = item.get('image_url', '')
+            # Debug print
+            st.write(f"Processing order {order['order_number']}, image URL: {image_url}")
+            
             orders_data.append({
                 "Order Number": order['order_number'],
                 "Created": datetime.strptime(order['created_at'], "%Y-%m-%dT%H:%M:%S%z").strftime("%Y-%m-%d %H:%M"),
                 "Deadline": (datetime.strptime(order['created_at'], "%Y-%m-%dT%H:%M:%S%z") + timedelta(days=3)).strftime("%Y-%m-%d %H:%M"),
                 "Product": item['title'],
                 "Quantity": item['quantity'],
-                "Image": item.get('image_url', ''),  # First image only
+                "Image": image_url,
                 "Reference Image": '',
                 "Item Spec": item.get('variant_title', '') or 'Default',
                 "Item Number": item.get('sku', ''),
@@ -1361,7 +1364,13 @@ def process_shopify_orders(orders):
                 "Shipping Address": format_shipping_address(order.get('shipping_address', {}))
             })
     
-    return pd.DataFrame(orders_data)
+    df = pd.DataFrame(orders_data)
+    
+    # Debug print DataFrame
+    st.write("DataFrame Image URLs:")
+    st.write(df[["Order Number", "Product", "Image"]].head())
+    
+    return df
 
 def format_shipping_address(address):
     """Format shipping address into a readable string"""
@@ -1381,7 +1390,7 @@ def format_shipping_address(address):
     return ", ".join(filter(None, address_parts))
 
 def get_shopify_orders(shop_url, access_token, status="unfulfilled", limit=250):
-    """Fetch orders from Shopify API with first product image"""
+    """Fetch orders from Shopify API with image debugging"""
     all_orders = []
     
     # Base URL for Shopify API
@@ -1403,27 +1412,25 @@ def get_shopify_orders(shop_url, access_token, status="unfulfilled", limit=250):
         data = response.json()
         orders = data.get('orders', [])
         
-        if not orders:
-            return []
-            
         for order in orders:
             for item in order.get('line_items', []):
                 if 'product_id' in item:
-                    # Get product details for first image
+                    # Get product details
                     product_url = f"https://{shop_url}/admin/api/2024-01/products/{item['product_id']}.json"
-                    product_response = requests.get(product_url, headers=headers)
+                    st.write(f"Fetching product: {item['product_id']}")  # Debug print
                     
+                    product_response = requests.get(product_url, headers=headers)
                     if product_response.status_code == 200:
                         product_data = product_response.json().get('product', {})
-                        # Get just the first image
                         if product_data.get('images'):
-                            first_image = product_data['images'][0].get('src', '')
-                            if first_image:
-                                # Add size parameters for better display
-                                base_url = first_image.split('?')[0]
-                                item['image_url'] = f"{base_url}?width=100&height=100&crop=center"
+                            # Get first image URL
+                            image_url = product_data['images'][0].get('src', '')
+                            st.write(f"Found image URL: {image_url}")  # Debug print
+                            
+                            # Store original URL directly
+                            item['image_url'] = image_url
                     
-                    time.sleep(0.5)  # Rate limiting
+                    time.sleep(0.5)
         
         all_orders.extend(orders)
         return all_orders
@@ -1495,6 +1502,11 @@ def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None
     status_emoji = "✅" if all_received else "⚠️" if any(order_data['Received']) else "❌"
     
     with st.expander(f"Order: {order_num} {status_emoji}", expanded=True):
+        first_image = order_data['Image'].iloc[0] if not order_data['Image'].empty else None
+        if first_image:
+            st.write(f"Image URL for testing: {first_image}")
+            # Try direct image display
+            st.image(first_image, width=100)
         # Show order details
         col1, col2, col3 = st.columns([2, 2, 1])
         with col1:
