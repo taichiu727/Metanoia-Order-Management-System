@@ -1474,7 +1474,7 @@ def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None
         
         st.write(f"Shipping Address: {order_data['Shipping Address'].iloc[0]}")
         
-        # Create order editor
+        # Create order editor with unique key
         editor_key = f"shopify_editor_{unique_key}"
         edited_df = st.data_editor(
             order_data[["Order Number", "Created", "Deadline", "Product", 
@@ -1487,6 +1487,15 @@ def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None
             disabled=["Order Number", "Created", "Deadline", "Product", 
                      "Item Spec", "Item Number", "Quantity", "Image"]
         )
+        
+        # Add action buttons with unique keys
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Print Order", key=f"print_shopify_{unique_key}"):
+                st.info("Print functionality coming soon!")
+        with col2:
+            if st.button("Fulfill Order", key=f"fulfill_shopify_{unique_key}"):
+                st.info("Fulfillment functionality coming soon!")
         
         # Handle changes
         if editor_key in st.session_state and "edited_rows" in st.session_state[editor_key]:
@@ -1525,7 +1534,7 @@ def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None
                         filtered_df.loc[mask, "Note"] = note
 
 @st.fragment
-def shopify_orders_table(filtered_df):
+def shopify_orders_table(filtered_df, section_key=""):
     """Fragment for displaying Shopify orders table"""
     if filtered_df.empty:
         return filtered_df
@@ -1540,41 +1549,48 @@ def shopify_orders_table(filtered_df):
     total_sections = (total_orders + 49) // 50  # Ceiling division
     
     # Create tabs for each section
-    section_tabs = st.tabs([f"Section {i+1}" for i in range(total_sections)])
+    tab_labels = [f"Section {i+1}" for i in range(total_sections)]
+    current_tab = st.radio(
+        "Select Section",
+        tab_labels,
+        key=f"section_selector_{section_key}",
+        horizontal=True,
+        label_visibility="collapsed"
+    )
     
-    for section_idx in range(total_sections):
-        with section_tabs[section_idx]:
-            # Calculate slice for this section
-            start_idx = section_idx * 50
-            end_idx = min((section_idx + 1) * 50, total_orders)
-            
-            # Get unique order numbers for this section
-            section_order_numbers = filtered_df['Order Number'].unique()[start_idx:end_idx]
-            
-            # Filter DataFrame to include only orders in this section
-            section_df = filtered_df[filtered_df['Order Number'].isin(section_order_numbers)]
-            
-            # Display summary
-            st.write(f"Showing orders {start_idx + 1} - {end_idx} of {total_orders}")
-            
-            # Process each unique order
-            for idx, order_num in enumerate(section_order_numbers):
-                order_data = section_df[section_df['Order Number'] == order_num]
-                unique_key = f"section_{section_idx}_orderidx_{idx}_order_{order_num}"
-                
-                try:
-                    shopify_order_editor(
-                        order_data, 
-                        order_num, 
-                        section_df, 
-                        db, 
-                        unique_key=unique_key
-                    )
-                except Exception as e:
-                    st.error(f"Error rendering order {order_num}: {str(e)}")
+    # Get current section index
+    section_idx = tab_labels.index(current_tab)
     
-    return filtered_df    
-
+    # Calculate slice for this section
+    start_idx = section_idx * 50
+    end_idx = min((section_idx + 1) * 50, total_orders)
+    
+    # Get unique order numbers for this section
+    section_order_numbers = filtered_df['Order Number'].unique()[start_idx:end_idx]
+    
+    # Filter DataFrame to include only orders in this section
+    section_df = filtered_df[filtered_df['Order Number'].isin(section_order_numbers)]
+    
+    # Display summary
+    st.write(f"Showing orders {start_idx + 1} - {end_idx} of {total_orders}")
+    
+    # Process each unique order
+    for idx, order_num in enumerate(section_order_numbers):
+        order_data = section_df[section_df['Order Number'] == order_num]
+        unique_key = f"shopify_section_{section_idx}_order_{order_num}"
+        
+        try:
+            shopify_order_editor(
+                order_data, 
+                order_num, 
+                section_df, 
+                db, 
+                unique_key=unique_key
+            )
+        except Exception as e:
+            st.error(f"Error rendering order {order_num}: {str(e)}")
+    
+    return filtered_df
 
 @st.fragment
 def handle_shopify_orders():
@@ -1594,10 +1610,10 @@ def handle_shopify_orders():
         st.session_state.shopify_orders_df = pd.DataFrame()
         st.session_state.shopify_orders_need_refresh = True
     
-    # Add refresh button
+    # Add refresh button with unique key
     col1, col2 = st.columns([1, 4])
     with col1:
-        if st.button("🔄 Refresh Orders", key="refresh_shopify"):
+        if st.button("🔄 Refresh Orders", key="refresh_shopify_orders"):
             st.session_state.shopify_orders_need_refresh = True
             st.rerun()
     
@@ -1607,11 +1623,11 @@ def handle_shopify_orders():
         st.session_state.shopify_orders_need_refresh = False
     
     if not st.session_state.shopify_orders_df.empty:
-        # Add filters
+        # Add filters with unique key
         status_filter = st.selectbox(
             "Financial Status",
             ["All"] + list(st.session_state.shopify_orders_df["Financial Status"].unique()),
-            key="shopify_status_filter"
+            key="shopify_status_filter_main"
         )
         
         # Apply filters
@@ -1619,8 +1635,8 @@ def handle_shopify_orders():
         if status_filter != "All":
             filtered_df = filtered_df[filtered_df["Financial Status"] == status_filter]
         
-        # Display orders using fragments
-        edited_df = shopify_orders_table(filtered_df)
+        # Display orders using fragments with unique section key
+        edited_df = shopify_orders_table(filtered_df, section_key="main")
         
         # Add export controls
         st.divider()
