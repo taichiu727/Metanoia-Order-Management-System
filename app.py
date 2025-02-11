@@ -1547,6 +1547,9 @@ def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None
             "Received", "Missing", "Note"
         ]
         
+        # Show small debug info above the editor if images aren't displaying
+        st.caption(f"Debug - First image URL: {order_data['Image'].iloc[0] if not order_data['Image'].empty else 'No image'}")
+        
         edited_df = st.data_editor(
             order_data[display_columns],
             column_config=get_column_config_shopify(),
@@ -1556,10 +1559,6 @@ def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None
             disabled=["Order Number", "Created", "Deadline", "Product", 
                      "Item Spec", "Item Number", "Quantity", "Image"]
         )
-        
-        # Show debug information for images
-        with st.expander("Debug Image URLs", expanded=False):
-            st.write(order_data[["Product", "Image"]].to_dict('records'))
         
         # Add action buttons
         col1, col2 = st.columns(2)
