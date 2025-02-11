@@ -2326,7 +2326,8 @@ def main():
                 type="password",
                 key="shopify_token")
             
-            if st.form_submit_button("Save Shopify Settings", key="save_shopify_settings"):
+            # Remove key parameter from form_submit_button
+            if st.form_submit_button("Save Shopify Settings"):
                 try:
                     db.save_shopify_credentials(shop_url, access_token)
                     st.session_state.shopify_authenticated = True
@@ -2339,10 +2340,11 @@ def main():
                 except Exception as e:
                     st.error(f"Error saving Shopify settings: {str(e)}")
                     
+        # Regular button outside the form can still have a key
         if st.session_state.shopify_authenticated:
             if st.button("Disconnect Shopify", key="disconnect_shopify"):
                 try:
-                    db.clear_shopify_credentials()  # You'll need to implement this method
+                    db.clear_shopify_credentials()
                     st.session_state.shopify_authenticated = False
                     st.session_state.shopify_credentials = None
                     st.success("Shopify disconnected successfully!")
