@@ -357,6 +357,7 @@ class OrderDatabase:
             return {row['item_sku']: row['image_data'] for row in self.cursor.fetchall()}
         finally:
             self.close()
+    
 
 def process_image(uploaded_file):
     """Process and compress uploaded images"""
@@ -1277,6 +1278,52 @@ def download_shipping_document(access_token, client_id, client_secret, shop_id, 
         return None
 
 
+
+
+def process_shopify_orders(orders):
+    """Process Shopify orders into a DataFrame format similar to Shopee orders"""
+    orders_data = []
+    
+    for order in orders:
+        # Process each line item in the order
+        for item in order.get('line_items', []):
+            orders_data.append({
+                "Order Number": order['order_number'],
+                "Created": datetime.strptime(order['created_at'], "%Y-%m-%dT%H:%M:%S%z").strftime("%Y-%m-%d %H:%M"),
+                "Deadline": (datetime.strptime(order['created_at'], "%Y-%m-%dT%H:%M:%S%z") + timedelta(days=3)).strftime("%Y-%m-%d %H:%M"),  # Example deadline
+                "Product": item['title'],
+                "Quantity": item['quantity'],
+                "Image": item.get('image', {}).get('src', ''),
+                "Reference Image": '',  # Can be populated later if needed
+                "Item Spec": item.get('variant_title', '') or 'Default',
+                "Item Number": item.get('sku', ''),
+                "Received": False,  # Default state
+                "Missing": 0,      # Default state
+                "Note": "",        # Default state
+                "Financial Status": order['financial_status'],
+                "Customer": f"{order.get('customer', {}).get('first_name', '')} {order.get('customer', {}).get('last_name', '')}".strip(),
+                "Shipping Address": format_shipping_address(order.get('shipping_address', {}))
+            })
+    
+    return pd.DataFrame(orders_data)
+
+def format_shipping_address(address):
+    """Format shipping address into a readable string"""
+    if not address:
+        return ""
+        
+    address_parts = [
+        address.get('address1', ''),
+        address.get('address2', ''),
+        address.get('city', ''),
+        address.get('province', ''),
+        address.get('country', ''),
+        address.get('zip', '')
+    ]
+    
+    # Filter out empty parts and join with commas
+    return ", ".join(filter(None, address_parts))
+
 def get_shopify_orders(shop_url, access_token, status="unfulfilled", limit=250):
     """Fetch orders from Shopify API"""
     all_orders = []
@@ -1323,50 +1370,6 @@ def get_shopify_orders(shop_url, access_token, status="unfulfilled", limit=250):
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching Shopify orders: {str(e)}")
         return []
-
-def process_shopify_orders(orders):
-    """Process Shopify orders into a DataFrame format similar to Shopee orders"""
-    orders_data = []
-    
-    for order in orders:
-        # Process each line item in the order
-        for item in order.get('line_items', []):
-            orders_data.append({
-                "Order Number": order['order_number'],
-                "Created": datetime.strptime(order['created_at'], "%Y-%m-%dT%H:%M:%S%z").strftime("%Y-%m-%d %H:%M"),
-                "Deadline": (datetime.strptime(order['created_at'], "%Y-%m-%dT%H:%M:%S%z") + timedelta(days=3)).strftime("%Y-%m-%d %H:%M"),  # Example deadline
-                "Product": item['title'],
-                "Quantity": item['quantity'],
-                "Image": item.get('image', {}).get('src', ''),
-                "Reference Image": '',  # Can be populated later if needed
-                "Item Spec": item.get('variant_title', '') or 'Default',
-                "Item Number": item.get('sku', ''),
-                "Received": False,  # Default state
-                "Missing": 0,      # Default state
-                "Note": "",        # Default state
-                "Financial Status": order['financial_status'],
-                "Customer": f"{order.get('customer', {}).get('first_name', '')} {order.get('customer', {}).get('last_name', '')}".strip(),
-                "Shipping Address": format_shipping_address(order.get('shipping_address', {}))
-            })
-    
-    return pd.DataFrame(orders_data)
-
-def format_shipping_address(address):
-    """Format shipping address into a readable string"""
-    if not address:
-        return ""
-        
-    address_parts = [
-        address.get('address1', ''),
-        address.get('address2', ''),
-        address.get('city', ''),
-        address.get('province', ''),
-        address.get('country', ''),
-        address.get('zip', '')
-    ]
-    
-    # Filter out empty parts and join with commas
-    return ", ".join(filter(None, address_parts))
 
 def fetch_and_process_shopify_orders(credentials, db):
     """Fetch orders from Shopify and process them into a DataFrame"""
