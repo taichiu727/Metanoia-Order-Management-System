@@ -1483,6 +1483,10 @@ def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None
     all_received = all(order_data['Received'])
     status_emoji = "✅" if all_received else "⚠️" if any(order_data['Received']) else "❌"
     
+    # Ensure unique_key is always set
+    if unique_key is None:
+        unique_key = f"shopify_order_{order_num}"
+    
     with st.expander(f"Order: {order_num} {status_emoji}", expanded=True):
         # Show order details
         col1, col2, col3 = st.columns([2, 2, 1])
@@ -1495,8 +1499,8 @@ def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None
         
         st.write(f"Shipping Address: {order_data['Shipping Address'].iloc[0]}")
         
-        # Create order editor
-        editor_key = f"shopify_editor_{unique_key}"
+        # Create order editor with unique key
+        editor_key = f"editor_{unique_key}"
         display_columns = [
             "Order Number", "Created", "Deadline", "Product", 
             "Item Spec", "Item Number", "Quantity", "Image",
@@ -1513,50 +1517,17 @@ def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None
                      "Item Spec", "Item Number", "Quantity", "Image"]
         )
         
-        # Add action buttons with unique keys
+        # Add action buttons with unique keys based on order number and unique_key
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("Print Order", key=f"print_shopify_{unique_key}"):
+            if st.button("Print Order", key=f"print_{unique_key}"):
                 st.info("Print functionality coming soon!")
         with col2:
-            if st.button("Fulfill Order", key=f"fulfill_shopify_{unique_key}"):
+            if st.button("Fulfill Order", key=f"fulfill_{unique_key}"):
                 st.info("Fulfillment functionality coming soon!")
         
         # Handle changes
-        if editor_key in st.session_state and "edited_rows" in st.session_state[editor_key]:
-            edited_rows = st.session_state[editor_key]["edited_rows"]
-            if edited_rows:
-                changes = []
-                for idx_str, changes_dict in edited_rows.items():
-                    idx = int(idx_str)
-                    row = edited_df.iloc[idx]
-                    received = changes_dict.get("Received", row["Received"])
-                    missing = changes_dict.get("Missing", row["Missing"])
-                    note = changes_dict.get("Note", row["Note"])
-                    
-                    changes.append((
-                        str(row["Order Number"]),
-                        str(row["Product"]),
-                        str(row["Item Spec"]),
-                        bool(received),
-                        int(missing) if pd.notna(missing) else 0,
-                        str(note) if pd.notna(note) else ""
-                    ))
-                
-                if changes:
-                    db.batch_upsert_shopify_order_tracking(changes)
-                    st.toast("✅ Changes saved!")
-                    
-                    # Update the main DataFrame
-                    for order_sn, product, item_spec, received, missing, note in changes:
-                        mask = (
-                            (filtered_df["Order Number"] == order_sn) &
-                            (filtered_df["Product"] == product) &
-                            (filtered_df["Item Spec"] == item_spec)
-                        )
-                        filtered_df.loc[mask, "Received"] = received
-                        filtered_df.loc[mask, "Missing"] = missing
-                        filtered_df.loc[mask, "Note"] = note
+        handle_editor_changes(editor_key, edited_df, filtered_df, db)
 
 @st.fragment
 def shopify_orders_table(filtered_df, section_key=""):
@@ -1573,12 +1544,12 @@ def shopify_orders_table(filtered_df, section_key=""):
     total_orders = len(filtered_df['Order Number'].unique())
     total_sections = (total_orders + 49) // 50  # Ceiling division
     
-    # Create tabs for each section
+    # Create section selector with unique key
     tab_labels = [f"Section {i+1}" for i in range(total_sections)]
     current_tab = st.radio(
         "Select Section",
         tab_labels,
-        key=f"section_selector_{section_key}",
+        key=f"section_selector_shopify_{section_key}",
         horizontal=True,
         label_visibility="collapsed"
     )
@@ -1602,7 +1573,8 @@ def shopify_orders_table(filtered_df, section_key=""):
     # Process each unique order
     for idx, order_num in enumerate(section_order_numbers):
         order_data = section_df[section_df['Order Number'] == order_num]
-        unique_key = f"shopify_section_{section_idx}_order_{order_num}"
+        # Create a truly unique key for each order editor
+        unique_key = f"{section_key}_sect{section_idx}_idx{idx}_order{order_num}"
         
         try:
             shopify_order_editor(
@@ -1638,7 +1610,7 @@ def handle_shopify_orders():
     # Add refresh button with unique key
     col1, col2 = st.columns([1, 4])
     with col1:
-        if st.button("🔄 Refresh Orders", key="refresh_shopify_orders"):
+        if st.button("🔄 Refresh Orders", key="refresh_shopify_main"):
             st.session_state.shopify_orders_need_refresh = True
             st.rerun()
     
@@ -1661,7 +1633,7 @@ def handle_shopify_orders():
             filtered_df = filtered_df[filtered_df["Financial Status"] == status_filter]
         
         # Display orders using fragments with unique section key
-        edited_df = shopify_orders_table(filtered_df, section_key="main")
+        edited_df = shopify_orders_table(filtered_df, section_key="main_shopify")
         
         # Add export controls
         st.divider()
