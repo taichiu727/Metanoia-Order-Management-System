@@ -1473,23 +1473,19 @@ def get_column_config_shopify():
         "Image": st.column_config.ImageColumn(
             "Image",
             width="medium",
-            help="Product image",
-            default=None
+            help="Product image"
         ),
         "Received": st.column_config.CheckboxColumn(
             "Received",
-            width="small",
-            default=False
+            width="small"
         ),
         "Missing": st.column_config.NumberColumn(
             "Missing",
-            width="small",
-            default=0
+            width="small"
         ),
         "Note": st.column_config.TextColumn(
             "Note",
-            width="medium",
-            default=""
+            width="medium"
         )
     }
 
