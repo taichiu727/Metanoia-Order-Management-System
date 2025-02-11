@@ -103,7 +103,7 @@ class OrderDatabase:
                 )
             """)
             self.conn.commit()
-
+            
 
             # New shopee_token table
             self.cursor.execute("""
@@ -117,6 +117,17 @@ class OrderDatabase:
                     merchant_id BIGINT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            self.cursor.execute("""
+                CREATE TABLE IF NOT EXISTS shopify_order_tracking (
+                    order_sn VARCHAR(50),
+                    product_name TEXT,
+                    variant_title TEXT,
+                    received BOOLEAN DEFAULT FALSE,
+                    missing_count INTEGER DEFAULT 0,
+                    note TEXT,
+                    last_
                 )
             """)
             self.cursor.execute("""
@@ -782,30 +793,7 @@ def on_data_change():
     except Exception as e:
         st.error(f"Error saving changes: {str(e)}")
 
-def handle_shopify_orders():
-    """Handle the Shopify orders tab content"""
-    st.header("Shopify Orders")
-    
-    if not st.session_state.shopify_authenticated:
-        st.info("Please configure your Shopify credentials in Settings")
-        return
-        
-    # Get credentials from session state
-    credentials = st.session_state.shopify_credentials
-    
-    # Add refresh button
-    if st.button("🔄 Refresh Shopify Orders", key="refresh_shopify"):
-        st.session_state.shopify_orders_need_refresh = True
-    
-    # Show loader while fetching orders
-    with st.spinner("Fetching Shopify orders..."):
-        try:
-            # Here you would implement your Shopify API calls using the credentials
-            st.info("Implementing Shopify order fetching...")
-            # TODO: Implement actual Shopify order fetching
-            
-        except Exception as e:
-            st.error(f"Error fetching Shopify orders: {str(e)}")
+
 
 def fetch_and_process_orders(token, db):
     """Fetch orders and process them into a DataFrame"""
@@ -1299,6 +1287,298 @@ def download_shipping_document(access_token, client_id, client_secret, shop_id, 
         st.error(traceback.format_exc())
         return None
 
+
+def get_shopify_orders(shop_url, access_token, status="unfulfilled", limit=250):
+    """Fetch orders from Shopify API"""
+    all_orders = []
+    
+    # Base URL for Shopify API
+    base_url = f"https://{shop_url}/admin/api/2024-01/orders.json"
+    
+    # Initial parameters
+    params = {
+        'status': 'open',
+        'fulfillment_status': status,
+        'limit': limit,
+        'fields': 'id,order_number,created_at,line_items,customer,shipping_address,financial_status'
+    }
+    
+    headers = {'X-Shopify-Access-Token': access_token}
+    
+    try:
+        while True:
+            response = requests.get(base_url, params=params, headers=headers)
+            response.raise_for_status()
+            
+            data = response.json()
+            orders = data.get('orders', [])
+            
+            if not orders:
+                break
+                
+            all_orders.extend(orders)
+            
+            # Check for next page
+            link_header = response.headers.get('Link', '')
+            if 'rel="next"' not in link_header:
+                break
+                
+            # Update params for next page
+            params['page_info'] = link_header.split('page_info=')[1].split('>')[0]
+            
+            # Rate limiting - Shopify has a rate limit of 2 requests per second
+            time.sleep(0.5)
+            
+        return all_orders
+        
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error fetching Shopify orders: {str(e)}")
+        return []
+
+def process_shopify_orders(orders):
+    """Process Shopify orders into a DataFrame format similar to Shopee orders"""
+    orders_data = []
+    
+    for order in orders:
+        # Process each line item in the order
+        for item in order.get('line_items', []):
+            orders_data.append({
+                "Order Number": order['order_number'],
+                "Created": datetime.strptime(order['created_at'], "%Y-%m-%dT%H:%M:%S%z").strftime("%Y-%m-%d %H:%M"),
+                "Deadline": (datetime.strptime(order['created_at'], "%Y-%m-%dT%H:%M:%S%z") + timedelta(days=3)).strftime("%Y-%m-%d %H:%M"),  # Example deadline
+                "Product": item['title'],
+                "Quantity": item['quantity'],
+                "Image": item.get('image', {}).get('src', ''),
+                "Reference Image": '',  # Can be populated later if needed
+                "Item Spec": item.get('variant_title', '') or 'Default',
+                "Item Number": item.get('sku', ''),
+                "Received": False,  # Default state
+                "Missing": 0,      # Default state
+                "Note": "",        # Default state
+                "Financial Status": order['financial_status'],
+                "Customer": f"{order.get('customer', {}).get('first_name', '')} {order.get('customer', {}).get('last_name', '')}".strip(),
+                "Shipping Address": format_shipping_address(order.get('shipping_address', {}))
+            })
+    
+    return pd.DataFrame(orders_data)
+
+def format_shipping_address(address):
+    """Format shipping address into a readable string"""
+    if not address:
+        return ""
+        
+    address_parts = [
+        address.get('address1', ''),
+        address.get('address2', ''),
+        address.get('city', ''),
+        address.get('province', ''),
+        address.get('country', ''),
+        address.get('zip', '')
+    ]
+    
+    # Filter out empty parts and join with commas
+    return ", ".join(filter(None, address_parts))
+
+def fetch_and_process_shopify_orders(credentials, db):
+    """Fetch orders from Shopify and process them into a DataFrame"""
+    with st.spinner("Fetching Shopify orders..."):
+        orders = get_shopify_orders(
+            shop_url=credentials['shop_url'],
+            access_token=credentials['access_token']
+        )
+        
+        if not orders:
+            return pd.DataFrame()
+            
+        # Process orders into DataFrame
+        df = process_shopify_orders(orders)
+        
+        # Load existing tracking data from database
+        tracking_data = {
+            (item['order_sn'], item['product_name'], item['item_spec']): item 
+            for item in db.get_shopify_order_tracking()
+        }
+        
+        # Update tracking status based on database
+        for idx, row in df.iterrows():
+            tracking_key = (str(row['Order Number']), row['Product'], row['Item Spec'])
+            if tracking_key in tracking_data:
+                df.at[idx, 'Received'] = tracking_data[tracking_key]['received']
+                df.at[idx, 'Missing'] = tracking_data[tracking_key]['missing_count']
+                df.at[idx, 'Note'] = tracking_data[tracking_key]['note']
+        
+        return df
+
+def get_shopify_order_tracking(self):
+        """Fetch all Shopify order tracking records from the database"""
+        try:
+            self.connect()
+            self.cursor.execute("""
+                SELECT 
+                    order_sn,
+                    product_name,
+                    variant_title as item_spec,
+                    received,
+                    missing_count,
+                    note
+                FROM shopify_order_tracking
+            """)
+            return self.cursor.fetchall()
+        finally:
+            self.close()
+    
+def upsert_shopify_order_tracking(self, order_sn, product_name, variant_title, received, missing_count, note):
+    """Update or insert Shopify order tracking record"""
+    try:
+        self.connect()
+        self.cursor.execute("""
+            INSERT INTO shopify_order_tracking (
+                order_sn, product_name, variant_title, received, missing_count, note, last_updated
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+            ON CONFLICT (order_sn, product_name, variant_title) 
+            DO UPDATE SET 
+                received = EXCLUDED.received,
+                missing_count = EXCLUDED.missing_count,
+                note = EXCLUDED.note,
+                last_updated = CURRENT_TIMESTAMP
+        """, (order_sn, product_name, variant_title, received, missing_count, note))
+        self.conn.commit()
+    finally:
+        self.close()
+
+def batch_upsert_shopify_order_tracking(self, records):
+    """Batch update or insert Shopify order tracking records"""
+    try:
+        self.connect()
+        with self.conn:
+            self.cursor.executemany("""
+                INSERT INTO shopify_order_tracking (
+                    order_sn, product_name, variant_title, received, missing_count, note, last_updated
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT (order_sn, product_name, variant_title) 
+                DO UPDATE SET 
+                    received = EXCLUDED.received,
+                    missing_count = EXCLUDED.missing_count,
+                    note = EXCLUDED.note,
+                    last_updated = CURRENT_TIMESTAMP
+            """, records)
+    finally:
+        self.close()
+
+def handle_shopify_orders():
+    """Handle the Shopify orders tab content"""
+    st.header("Shopify Orders")
+    
+    if not st.session_state.shopify_authenticated:
+        st.info("Please configure your Shopify credentials in Settings")
+        return
+        
+    # Get credentials from session state
+    credentials = st.session_state.shopify_credentials
+    db = OrderDatabase()
+    
+    # Initialize Shopify orders in session state if not present
+    if "shopify_orders_df" not in st.session_state:
+        st.session_state.shopify_orders_df = pd.DataFrame()
+        st.session_state.shopify_orders_need_refresh = True
+    
+    # Add refresh button
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        if st.button("🔄 Refresh Orders", key="refresh_shopify"):
+            st.session_state.shopify_orders_need_refresh = True
+    
+    # Fetch and display orders
+    if st.session_state.shopify_orders_need_refresh:
+        st.session_state.shopify_orders_df = fetch_and_process_shopify_orders(credentials, db)
+        st.session_state.shopify_orders_need_refresh = False
+    
+    if not st.session_state.shopify_orders_df.empty:
+        # Add filters
+        status_filter = st.selectbox(
+            "Financial Status",
+            ["All"] + list(st.session_state.shopify_orders_df["Financial Status"].unique()),
+            key="shopify_status_filter"
+        )
+        
+        # Apply filters
+        filtered_df = st.session_state.shopify_orders_df.copy()
+        if status_filter != "All":
+            filtered_df = filtered_df[filtered_df["Financial Status"] == status_filter]
+        
+        # Display orders using the same table format as Shopee
+        st.write(f"Showing {len(filtered_df)} orders")
+        
+        # Group orders by order number
+        for order_num in filtered_df["Order Number"].unique():
+            order_data = filtered_df[filtered_df["Order Number"] == order_num]
+            
+            # Create a unique key for this order
+            unique_key = f"shopify_order_{order_num}"
+            
+            with st.expander(f"Order: {order_num}", expanded=True):
+                # Show order details
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write(f"Customer: {order_data['Customer'].iloc[0]}")
+                with col2:
+                    st.write(f"Created: {order_data['Created'].iloc[0]}")
+                
+                st.write(f"Shipping Address: {order_data['Shipping Address'].iloc[0]}")
+                
+                # Create order editor
+                editor_key = f"shopify_editor_{unique_key}"
+                edited_df = st.data_editor(
+                    order_data[["Order Number", "Created", "Deadline", "Product", 
+                               "Item Spec", "Item Number", "Quantity", "Image",
+                               "Received", "Missing", "Note"]],
+                    column_config=get_column_config(),
+                    key=editor_key,
+                    use_container_width=True,
+                    num_rows="fixed",
+                    disabled=["Order Number", "Created", "Deadline", "Product", 
+                            "Item Spec", "Item Number", "Quantity", "Image"]
+                )
+                
+                # Handle changes
+                if editor_key in st.session_state and "edited_rows" in st.session_state[editor_key]:
+                    edited_rows = st.session_state[editor_key]["edited_rows"]
+                    if edited_rows:
+                        changes = []
+                        for idx_str, changes_dict in edited_rows.items():
+                            idx = int(idx_str)
+                            row = edited_df.iloc[idx]
+                            received = changes_dict.get("Received", row["Received"])
+                            missing = changes_dict.get("Missing", row["Missing"])
+                            note = changes_dict.get("Note", row["Note"])
+                            
+                            changes.append((
+                                str(row["Order Number"]),
+                                str(row["Product"]),
+                                str(row["Item Spec"]),
+                                bool(received),
+                                int(missing) if pd.notna(missing) else 0,
+                                str(note) if pd.notna(note) else ""
+                            ))
+                        
+                        if changes:
+                            db.batch_upsert_shopify_order_tracking(changes)
+                            st.toast("✅ Changes saved!")
+                            
+                            # Update the main DataFrame
+                            for order_sn, product, item_spec, received, missing, note in changes:
+                                mask = (
+                                    (st.session_state.shopify_orders_df["Order Number"] == order_sn) &
+                                    (st.session_state.shopify_orders_df["Product"] == product) &
+                                    (st.session_state.shopify_orders_df["Item Spec"] == item_spec)
+                                )
+                                st.session_state.shopify_orders_df.loc[mask, "Received"] = received
+                                st.session_state.shopify_orders_df.loc[mask, "Missing"] = missing
+                                st.session_state.shopify_orders_df.loc[mask, "Note"] = note
+    else:
+        st.info("No unfulfilled orders found.")
 
 @st.fragment
 def sidebar_controls():
