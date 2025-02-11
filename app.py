@@ -704,6 +704,19 @@ def initialize_session_state():
         st.session_state.status_filter = "All"
     if "show_preorders" not in st.session_state:
         st.session_state.show_preorders = False
+    if "shopify_authenticated" not in st.session_state:
+        db = OrderDatabase()
+        try:
+            credentials = db.get_shopify_credentials()
+            if credentials and credentials.get('shop_url') and credentials.get('access_token'):
+                st.session_state.shopify_authenticated = True
+                st.session_state.shopify_credentials = credentials
+            else:
+                st.session_state.shopify_authenticated = False
+                st.session_state.shopify_credentials = None
+        except Exception as e:
+            st.session_state.shopify_authenticated = False
+            st.session_state.shopify_credentials = None
 
 def initialize_product_state():
     """Initialize product-related session state variables"""
@@ -768,6 +781,31 @@ def on_data_change():
             
     except Exception as e:
         st.error(f"Error saving changes: {str(e)}")
+
+def handle_shopify_orders():
+    """Handle the Shopify orders tab content"""
+    st.header("Shopify Orders")
+    
+    if not st.session_state.shopify_authenticated:
+        st.info("Please configure your Shopify credentials in Settings")
+        return
+        
+    # Get credentials from session state
+    credentials = st.session_state.shopify_credentials
+    
+    # Add refresh button
+    if st.button("🔄 Refresh Shopify Orders", key="refresh_shopify"):
+        st.session_state.shopify_orders_need_refresh = True
+    
+    # Show loader while fetching orders
+    with st.spinner("Fetching Shopify orders..."):
+        try:
+            # Here you would implement your Shopify API calls using the credentials
+            st.info("Implementing Shopify order fetching...")
+            # TODO: Implement actual Shopify order fetching
+            
+        except Exception as e:
+            st.error(f"Error fetching Shopify orders: {str(e)}")
 
 def fetch_and_process_orders(token, db):
     """Fetch orders and process them into a DataFrame"""
@@ -2262,13 +2300,9 @@ def main():
                 st.info("No Shopee orders found in the selected time range.")
         
         with platform_tabs[1]:
-            st.header("Shopify Orders")
-            if "shopify_authenticated" not in st.session_state:
-                # Add Shopify authentication here
-                st.info("Please configure your Shopify credentials in Settings")
-            else:
-                # Add Shopify orders table and controls here
-                st.info("Shopify integration coming soon!")
+            handle_shopify_orders() 
+          
+            
     
     with main_tabs[1]:
         products_page()
@@ -2278,19 +2312,43 @@ def main():
         
         # Platform Settings
         st.subheader("Shopify Settings")
+        if st.session_state.shopify_authenticated:
+            st.success("✅ Shopify is connected")
+            st.info(f"Connected to shop: {st.session_state.shopify_credentials['shop_url']}")
+            
         with st.form("shopify_settings"):
             shop_url = st.text_input("Shop URL", 
-                placeholder="your-store.myshopify.com")
-            access_token = st.text_input("Access Token", type="password")
+                value=st.session_state.shopify_credentials.get('shop_url', '') if st.session_state.shopify_authenticated else '',
+                placeholder="your-store.myshopify.com",
+                key="shopify_url")
+            access_token = st.text_input("Access Token", 
+                value=st.session_state.shopify_credentials.get('access_token', '') if st.session_state.shopify_authenticated else '',
+                type="password",
+                key="shopify_token")
             
-            if st.form_submit_button("Save Shopify Settings"):
-                # Save Shopify credentials to database
+            if st.form_submit_button("Save Shopify Settings", key="save_shopify_settings"):
                 try:
                     db.save_shopify_credentials(shop_url, access_token)
-                    st.success("Shopify settings saved!")
                     st.session_state.shopify_authenticated = True
+                    st.session_state.shopify_credentials = {
+                        'shop_url': shop_url,
+                        'access_token': access_token
+                    }
+                    st.success("Shopify settings saved!")
+                    st.rerun()
                 except Exception as e:
                     st.error(f"Error saving Shopify settings: {str(e)}")
+                    
+        if st.session_state.shopify_authenticated:
+            if st.button("Disconnect Shopify", key="disconnect_shopify"):
+                try:
+                    db.clear_shopify_credentials()  # You'll need to implement this method
+                    st.session_state.shopify_authenticated = False
+                    st.session_state.shopify_credentials = None
+                    st.success("Shopify disconnected successfully!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error disconnecting Shopify: {str(e)}")
         
         # Add divider between settings sections
         st.divider()
