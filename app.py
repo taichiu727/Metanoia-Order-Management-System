@@ -2187,7 +2187,7 @@ def orders_table(filtered_df):
     filtered_df = filtered_df.sort_values('Created', ascending=True)
     
     # Calculate total sections with 30 orders per section
-    ORDERS_PER_SECTION = 30  # Changed from 50 to 30
+    ORDERS_PER_SECTION = 20  # Changed from 50 to 30
     total_orders = len(filtered_df['Order Number'].unique())
     total_sections = (total_orders + ORDERS_PER_SECTION - 1) // ORDERS_PER_SECTION  # Ceiling division
     
