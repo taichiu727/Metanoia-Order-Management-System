@@ -2186,9 +2186,10 @@ def orders_table(filtered_df):
     # Sort orders from oldest to newest
     filtered_df = filtered_df.sort_values('Created', ascending=True)
     
-    # Calculate total sections
+    # Calculate total sections with 30 orders per section
+    ORDERS_PER_SECTION = 30  # Changed from 50 to 30
     total_orders = len(filtered_df['Order Number'].unique())
-    total_sections = (total_orders + 29) // 30  # Ceiling division
+    total_sections = (total_orders + ORDERS_PER_SECTION - 1) // ORDERS_PER_SECTION  # Ceiling division
     
     # Create tabs for each section
     section_tabs = st.tabs([f"Section {i+1}" for i in range(total_sections)])
@@ -2196,8 +2197,8 @@ def orders_table(filtered_df):
     for section_idx in range(total_sections):
         with section_tabs[section_idx]:
             # Calculate slice for this section
-            start_idx = section_idx * 50
-            end_idx = min((section_idx + 1) * 50, total_orders)
+            start_idx = section_idx * ORDERS_PER_SECTION
+            end_idx = min(start_idx + ORDERS_PER_SECTION, total_orders)
             
             # Get unique order numbers for this section
             section_order_numbers = filtered_df['Order Number'].unique()[start_idx:end_idx]
