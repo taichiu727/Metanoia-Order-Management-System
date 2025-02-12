@@ -2188,7 +2188,7 @@ def orders_table(filtered_df):
     
     # Calculate total sections
     total_orders = len(filtered_df['Order Number'].unique())
-    total_sections = (total_orders + 49) // 30  # Ceiling division
+    total_sections = (total_orders + 29) // 30  # Ceiling division
     
     # Create tabs for each section
     section_tabs = st.tabs([f"Section {i+1}" for i in range(total_sections)])
