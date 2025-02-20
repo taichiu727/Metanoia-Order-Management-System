@@ -1647,125 +1647,54 @@ def get_shopify_order_details(shop_url, access_token, order_num):
         return None
 
 def extract_logistics_info(order):
-    """Extract logistics information from order additional details/attributes"""
+    """Extract logistics information from order notes or attributes"""
     logistics_info = {
         'cvs_company': None,
         'cvs_store_id': None,
         'logistics_subtype': None
     }
     
-    # Check in multiple possible locations where Shopify might store this data
+    # Check order notes
+    note = order.get('Additional details', '')
+    if note:
+        # Extract using regex patterns
+        cvs_company_match = re.search(r'超商類型\(CvsCompany\)\s*[：:]\s*(.+?)(?:\n|$)', note)
+        if cvs_company_match:
+            company = cvs_company_match.group(1).strip()
+            # Map to ECPay logistics subtype
+            if "7-ELEVEN" in company:
+                logistics_info['cvs_company'] = "7-ELEVEN"
+                logistics_info['logistics_subtype'] = "UNIMARTC2C"
+            elif "全家" in company:
+                logistics_info['cvs_company'] = "全家"
+                logistics_info['logistics_subtype'] = "FAMIC2C"
+            elif "萊爾富" in company:
+                logistics_info['cvs_company'] = "萊爾富"
+                logistics_info['logistics_subtype'] = "HILIFEC2C"
+            elif "OK" in company:
+                logistics_info['cvs_company'] = "OK"
+                logistics_info['logistics_subtype'] = "OKMARTC2C"
+        
+        # Extract store ID
+        store_id_match = re.search(r'門市代號\(CvsStoreId\)\s*[：:]\s*(\d+)', note)
+        if store_id_match:
+            logistics_info['cvs_store_id'] = store_id_match.group(1).strip()
     
-    # 1. Check note_attributes (common place for additional details)
+    # Check note attributes as well (Shopify sometimes stores these separately)
     note_attributes = order.get('note_attributes', [])
-    for attr in note_attributes:
-        name = attr.get('name', '').strip().lower()
-        value = attr.get('value', '').strip()
-        
-        if name in ['超商類型', 'cvscompany', 'cvs_company', 'convenience store']:
-            if '7-ELEVEN' in value:
-                logistics_info['cvs_company'] = '7-ELEVEN'
-                logistics_info['logistics_subtype'] = 'UNIMARTC2C'
-            elif '全家' in value:
-                logistics_info['cvs_company'] = '全家'
-                logistics_info['logistics_subtype'] = 'FAMIC2C'
-            elif '萊爾富' in value:
-                logistics_info['cvs_company'] = '萊爾富'
-                logistics_info['logistics_subtype'] = 'HILIFEC2C'
-            elif 'OK' in value:
-                logistics_info['cvs_company'] = 'OK'
-                logistics_info['logistics_subtype'] = 'OKMARTC2C'
-        
-        if name in ['門市代號', 'cvsstoreid', 'cvs_store_id', 'store id']:
-            logistics_info['cvs_store_id'] = value
-    
-    # 2. Check metafields (another place for additional details)
-    metafields = order.get('metafields', [])
-    for field in metafields:
-        key = field.get('key', '').lower()
-        value = field.get('value', '')
-        
-        if key in ['cvs_company', 'cvscompany', 'convenience_store_type']:
-            if '7-ELEVEN' in value:
-                logistics_info['cvs_company'] = '7-ELEVEN'
-                logistics_info['logistics_subtype'] = 'UNIMARTC2C'
-            elif '全家' in value:
-                logistics_info['cvs_company'] = '全家'
-                logistics_info['logistics_subtype'] = 'FAMIC2C'
-        
-        if key in ['cvs_store_id', 'cvsstoreid', 'store_id']:
-            logistics_info['cvs_store_id'] = value
-    
-    # 3. Check order tags (sometimes stores use tags for this)
-    tags = order.get('tags', '').split(',')
-    for tag in tags:
-        tag = tag.strip().lower()
-        if tag.startswith('cvs:'):
-            parts = tag.split(':')
-            if len(parts) > 1:
-                cvs_data = parts[1]
-                if '7-eleven' in cvs_data:
-                    logistics_info['cvs_company'] = '7-ELEVEN'
-                    logistics_info['logistics_subtype'] = 'UNIMARTC2C'
-                elif 'family' in cvs_data or 'fami' in cvs_data:
-                    logistics_info['cvs_company'] = '全家'
-                    logistics_info['logistics_subtype'] = 'FAMIC2C'
-        
-        if tag.startswith('store:'):
-            parts = tag.split(':')
-            if len(parts) > 1:
-                logistics_info['cvs_store_id'] = parts[1]
-    
-    # 4. Check shipping address for the store information
-    shipping_address = order.get('shipping_address', {})
-    company = shipping_address.get('company', '')
-    address1 = shipping_address.get('address1', '')
-    address2 = shipping_address.get('address2', '')
-    
-    # Look for patterns like "7-ELEVEN (255365)" in address
-    cvs_pattern = re.search(r'(7-ELEVEN|全家|萊爾富|OK)\s*[\(（](\d+)[\)）]', company + ' ' + address1 + ' ' + address2)
-    if cvs_pattern:
-        cvs_company = cvs_pattern.group(1)
-        store_id = cvs_pattern.group(2)
-        
-        if '7-ELEVEN' in cvs_company:
-            logistics_info['cvs_company'] = '7-ELEVEN'
-            logistics_info['logistics_subtype'] = 'UNIMARTC2C'
-        elif '全家' in cvs_company:
-            logistics_info['cvs_company'] = '全家'
-            logistics_info['logistics_subtype'] = 'FAMIC2C'
-        elif '萊爾富' in cvs_company:
-            logistics_info['cvs_company'] = '萊爾富'
-            logistics_info['logistics_subtype'] = 'HILIFEC2C'
-        elif 'OK' in cvs_company:
-            logistics_info['cvs_company'] = 'OK'
-            logistics_info['logistics_subtype'] = 'OKMARTC2C'
+    if note_attributes:
+        for attr in note_attributes:
+            if attr.get('name', '').lower() in ['cvscompany', 'cvs_company', 'convenience store']:
+                company = attr.get('value', '').strip()
+                if "7-ELEVEN" in company:
+                    logistics_info['cvs_company'] = "7-ELEVEN"
+                    logistics_info['logistics_subtype'] = "UNIMARTC2C"
+                elif "全家" in company:
+                    logistics_info['cvs_company'] = "全家"
+                    logistics_info['logistics_subtype'] = "FAMIC2C"
             
-        logistics_info['cvs_store_id'] = store_id
-    
-    # 5. Direct search in note, addresses for patterns
-    all_text = (
-        order.get('note', '') + ' ' + 
-        shipping_address.get('company', '') + ' ' + 
-        shipping_address.get('address1', '') + ' ' + 
-        shipping_address.get('address2', '')
-    ).lower()
-    
-    # Search for explicit declarations like "超商類型(CvsCompany) 7-ELEVEN"
-    company_match = re.search(r'超商類型.*[：:]\s*(.+?)(?:\n|$|\s)', all_text)
-    if company_match:
-        company = company_match.group(1).strip()
-        if '7-eleven' in company:
-            logistics_info['cvs_company'] = '7-ELEVEN'
-            logistics_info['logistics_subtype'] = 'UNIMARTC2C'
-        elif '全家' in company:
-            logistics_info['cvs_company'] = '全家'
-            logistics_info['logistics_subtype'] = 'FAMIC2C'
-    
-    # Search for explicit store ID declarations like "門市代號(CvsStoreId) 255365"
-    store_id_match = re.search(r'門市代號.*[：:]\s*(\d+)', all_text)
-    if store_id_match:
-        logistics_info['cvs_store_id'] = store_id_match.group(1).strip()
+            if attr.get('name', '').lower() in ['cvsstoreid', 'cvs_store_id', 'store id']:
+                logistics_info['cvs_store_id'] = attr.get('value', '').strip()
     
     return logistics_info
 
