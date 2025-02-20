@@ -1569,8 +1569,9 @@ def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None
                         
                         # Create a detailed display of logistics information
                         st.subheader("物流資訊 (Logistics Information)")
-                        col1, col2, col3 = st.columns(3)
                         
+                        # Main CVS Info Columns
+                        col1, col2, col3 = st.columns(3)
                         with col1:
                             st.metric("超商類型 (CVS Company)", 
                                       logistics_info.get('cvs_company', 'N/A'))
@@ -1596,15 +1597,17 @@ def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None
                             st.metric("物流子類型 (Logistics Subtype)", 
                                       logistics_info.get('logistics_subtype', 'N/A'))
                         
-                        # Additional store details
-                        with st.expander("門市詳細資訊 (Store Details)"):
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                st.write(f"門市名稱 (Store Name): {logistics_info.get('store_name', 'N/A')}")
-                                st.write(f"門市城市 (Store City): {logistics_info.get('store_city', 'N/A')}")
-                            with col2:
-                                st.write(f"門市地址 (Store Address): {logistics_info.get('store_address', 'N/A')}")
-                                st.write(f"門市郵遞區號 (Store Zip): {logistics_info.get('store_zip', 'N/A')}")
+                        # Separate section for store details
+                        st.subheader("門市詳細資訊 (Store Details)")
+                        
+                        # Store Details Columns
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.write(f"**門市名稱 (Store Name):** {logistics_info.get('store_name', 'N/A')}")
+                            st.write(f"**門市城市 (Store City):** {logistics_info.get('store_city', 'N/A')}")
+                        with col2:
+                            st.write(f"**門市地址 (Store Address):** {logistics_info.get('store_address', 'N/A')}")
+                            st.write(f"**門市郵遞區號 (Store Zip):** {logistics_info.get('store_zip', 'N/A')}")
                         
                         # Original ECPay flow
                         st.success("成功取得訂單資料")
