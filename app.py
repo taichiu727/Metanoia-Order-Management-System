@@ -1647,64 +1647,63 @@ def get_shopify_order_details(shop_url, access_token, order_num):
         return None
 
 def extract_logistics_info(order):
-    """Extract logistics information from order details by processing lines"""
+    """Extract logistics information from order details using note_attributes first,
+    and falling back to note parsing if necessary."""
     logistics_info = {
         'cvs_company': None,
         'cvs_store_id': None,
         'logistics_subtype': None
     }
     
-    # Attempt to get the additional details.
-    # Sometimes this might be in order.get('note') or another key—double-check your JSON keys.
-    st.write("Full order response:")
-    st.write(json.dumps(order, indent=2))
-    note = order.get('note', '')
-    print("Additional details:", note)
-    if note:
-        # Split the note into non-empty, trimmed lines
-        lines = [line.strip() for line in note.splitlines() if line.strip()]
-        
-        # Iterate through the lines to find matching fields
-        for idx, line in enumerate(lines):
-            # Look for the CVS Company label and then use the following line for the value.
-            if '超商類型' in line and '(CvsCompany)' in line:
-                if idx + 1 < len(lines):
-                    company = lines[idx + 1]
-                    if "7-ELEVEN" in company:
-                        logistics_info['cvs_company'] = "7-ELEVEN"
-                        logistics_info['logistics_subtype'] = "UNIMARTC2C"
-                    elif "全家" in company:
-                        logistics_info['cvs_company'] = "全家"
-                        logistics_info['logistics_subtype'] = "FAMIC2C"
-                    elif "萊爾富" in company:
-                        logistics_info['cvs_company'] = "萊爾富"
-                        logistics_info['logistics_subtype'] = "HILIFEC2C"
-                    elif "OK" in company:
-                        logistics_info['cvs_company'] = "OK"
-                        logistics_info['logistics_subtype'] = "OKMARTC2C"
-            
-            # Look for the CVS Store ID label and capture the following line as its value.
-            if '門市代號' in line and '(CvsStoreId)' in line:
-                if idx + 1 < len(lines):
-                    logistics_info['cvs_store_id'] = lines[idx + 1]
-    
-    # Optionally, check note_attributes if available
+    # First, try to extract from note_attributes
     note_attributes = order.get('note_attributes', [])
     if note_attributes:
         for attr in note_attributes:
             name = attr.get('name', '').lower()
-            if name in ['cvscompany', 'cvs_company', 'convenience store']:
-                company = attr.get('value', '').strip()
-                if "7-ELEVEN" in company:
-                    logistics_info['cvs_company'] = "7-ELEVEN"
+            value = attr.get('value', '').strip()
+            # Check for CVS company; using substring check to match keys like "超商類型(CvsCompany)"
+            if 'cvscompany' in name:
+                logistics_info['cvs_company'] = value
+                # Optionally map the company to a logistics subtype
+                if "7-eleven" in value.lower():
                     logistics_info['logistics_subtype'] = "UNIMARTC2C"
-                elif "全家" in company:
-                    logistics_info['cvs_company'] = "全家"
+                elif "全家" in value:
                     logistics_info['logistics_subtype'] = "FAMIC2C"
-            if name in ['cvsstoreid', 'cvs_store_id', 'store id']:
-                logistics_info['cvs_store_id'] = attr.get('value', '').strip()
+                elif "萊爾富" in value:
+                    logistics_info['logistics_subtype'] = "HILIFEC2C"
+                elif "ok" in value.lower():
+                    logistics_info['logistics_subtype'] = "OKMARTC2C"
+            # Check for CVS store id; e.g. "門市代號(CvsStoreId)"
+            elif 'cvsstoreid' in name:
+                logistics_info['cvs_store_id'] = value
+            # Also, directly grab logistics subtype if available, e.g. "物流子代碼(LogisticsSubType)"
+            elif 'logisticssubtype' in name:
+                logistics_info['logistics_subtype'] = value
+
+    # Fallback: if not found in note_attributes, try to parse the note field
+    if not logistics_info['cvs_company'] or not logistics_info['cvs_store_id']:
+        note = order.get('note', '')
+        if note:
+            lines = [line.strip() for line in note.splitlines() if line.strip()]
+            for idx, line in enumerate(lines):
+                if '超商類型' in line and '(CvsCompany)' in line:
+                    if idx + 1 < len(lines):
+                        company = lines[idx + 1]
+                        logistics_info['cvs_company'] = company
+                        if "7-ELEVEN" in company:
+                            logistics_info['logistics_subtype'] = "UNIMARTC2C"
+                        elif "全家" in company:
+                            logistics_info['logistics_subtype'] = "FAMIC2C"
+                        elif "萊爾富" in company:
+                            logistics_info['logistics_subtype'] = "HILIFEC2C"
+                        elif "OK" in company:
+                            logistics_info['logistics_subtype'] = "OKMARTC2C"
+                if '門市代號' in line and '(CvsStoreId)' in line:
+                    if idx + 1 < len(lines):
+                        logistics_info['cvs_store_id'] = lines[idx + 1]
     
     return logistics_info
+
 
 
 
