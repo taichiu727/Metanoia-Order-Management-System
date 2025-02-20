@@ -1536,7 +1536,7 @@ def fetch_and_process_shopify_orders(credentials, db):
 
 @st.fragment
 def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None):
-    """Fragment for individual Shopify order editing"""
+    """Enhanced Shopify order editing function with improved logistics info display"""
     all_received = all(order_data['Received'])
     status_emoji = "✅" if all_received else "⚠️" if any(order_data['Received']) else "❌"
     
@@ -1556,7 +1556,7 @@ def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None
                 st.write(f"Shop URL: {credentials['shop_url']}")
                 
                 try:
-                    # Get order details from Shopify
+                    # Get order details from Shopify with enhanced logging
                     order_details = get_shopify_order_details(
                         shop_url=credentials['shop_url'],
                         access_token=credentials['access_token'],
@@ -1564,6 +1564,26 @@ def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None
                     )
                     
                     if order_details:
+                        # Extract and display logistics information
+                        logistics_info = extract_logistics_info(order_details)
+                        
+                        # Create a detailed display of logistics information
+                        st.subheader("物流資訊 (Logistics Information)")
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            st.metric("超商類型 (CVS Company)", 
+                                      logistics_info.get('cvs_company', 'N/A'))
+                        
+                        with col2:
+                            st.metric("門市代號 (Store ID)", 
+                                      logistics_info.get('cvs_store_id', 'N/A'))
+                        
+                        with col3:
+                            st.metric("物流子類型 (Logistics Subtype)", 
+                                      logistics_info.get('logistics_subtype', 'N/A'))
+                        
+                        # Original ECPay flow
                         st.success("成功取得訂單資料")
                         ecpay_db = ECPayDatabase(db.conn)
                         shopify_ecpay_ui(order_details, ecpay_db)
@@ -1574,6 +1594,7 @@ def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None
                     st.error(f"處理訂單資料時發生錯誤: {str(e)}")
                     st.exception(e)  # Show full exception details
         
+        # Additional context display
         st.write(f"Shipping Address: {order_data['Shipping Address'].iloc[0]}")
         
         # Create order editor with unique key
@@ -1609,6 +1630,85 @@ def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None
         # Handle changes
         handle_shopify_editor_changes(editor_key, edited_df, filtered_df, db)
 
+def extract_logistics_info(order):
+    """
+    Extract logistics info with comprehensive parsing and error handling.
+    
+    Args:
+        order (dict): Shopify order dictionary
+    
+    Returns:
+        dict: Extracted logistics information
+    """
+    # Initialize logistics info with default values
+    logistics_info = {
+        'cvs_company': None,
+        'cvs_store_id': None,
+        'logistics_subtype': None,
+        'store_name': None,
+        'store_address': None,
+        'store_city': None,
+        'store_zip': None
+    }
+
+    # Try to extract from note_attributes first
+    note_attributes = order.get('note_attributes', [])
+    
+    # Mapping of attribute names to logistics info keys
+    attr_mapping = {
+        '超商類型(CvsCompany)': 'cvs_company',
+        'CvsCompany': 'cvs_company',
+        '門市代號(CvsStoreId)': 'cvs_store_id',
+        'CvsStoreId': 'cvs_store_id',
+        '物流子代碼(LogisticsSubType)': 'logistics_subtype',
+        'LogisticsSubType': 'logistics_subtype',
+        '門市名稱(CvsStoreName)': 'store_name',
+        'CvsStoreName': 'store_name',
+        '門市地址(CvsAddress)': 'store_address',
+        'CvsAddress': 'store_address',
+        '門市城市(CvsCity)': 'store_city',
+        'CvsCity': 'store_city',
+        '門市郵遞區號(CvsZip)': 'store_zip',
+        'CvsZip': 'store_zip'
+    }
+
+    # Extract information from note attributes
+    for attr in note_attributes:
+        attr_name = attr.get('name', '')
+        attr_value = str(attr.get('value', '')).strip()
+        
+        # Check if the attribute name matches any in our mapping
+        for map_key, info_key in attr_mapping.items():
+            if map_key in attr_name:
+                # Special handling for company and logistics subtype
+                if info_key == 'cvs_company':
+                    if "7-ELEVEN" in attr_value.upper():
+                        logistics_info['logistics_subtype'] = "UNIMARTC2C"
+                    elif "全家" in attr_value:
+                        logistics_info['logistics_subtype'] = "FAMIC2C"
+                    elif "萊爾富" in attr_value:
+                        logistics_info['logistics_subtype'] = "HILIFEC2C"
+                    elif "OK" in attr_value.upper():
+                        logistics_info['logistics_subtype'] = "OKMARTC2C"
+                
+                # Set the value
+                logistics_info[info_key] = attr_value
+
+    # Fallback: Try to extract from line item properties if note attributes fail
+    if not all(logistics_info.values()):
+        line_items = order.get('line_items', [])
+        for item in line_items:
+            properties = item.get('properties', [])
+            for prop in properties:
+                prop_name = prop.get('name', '')
+                prop_value = str(prop.get('value', '')).strip()
+                
+                # Check for CVS-related properties
+                if '_AkoCVSId' in prop_name:
+                    # You might want to do something with this ID or use it for additional lookup
+                    logistics_info['ako_cvs_id'] = prop_value
+
+    return logistics_info
 def get_shopify_order_details(shop_url, access_token, order_num):
     """Fetch detailed order information from Shopify with logistics details"""
     try:
@@ -1645,62 +1745,6 @@ def get_shopify_order_details(shop_url, access_token, order_num):
     except Exception as e:
         st.error(f"Error fetching Shopify order details: {str(e)}")
         return None
-
-def extract_logistics_info(order):
-    """Extract logistics info using note_attributes first, then fall back to note parsing."""
-    logistics_info = {
-        'cvs_company': None,
-        'cvs_store_id': None,
-        'logistics_subtype': None
-    }
-
-    # First, try to extract from note_attributes
-    note_attributes = order.get('note_attributes', [])
-    for attr in note_attributes:
-        attr_name = attr.get('name', '')
-        attr_value = attr.get('value', '').strip()
-        # Check for CVS Company using either the English or Chinese label
-        if "CvsCompany" in attr_name or "超商類型" in attr_name:
-            logistics_info['cvs_company'] = attr_value
-            # Map company name to logistics subtype
-            if "7-ELEVEN" in attr_value.upper():
-                logistics_info['logistics_subtype'] = "UNIMARTC2C"
-            elif "全家" in attr_value:
-                logistics_info['logistics_subtype'] = "FAMIC2C"
-            elif "萊爾富" in attr_value:
-                logistics_info['logistics_subtype'] = "HILIFEC2C"
-            elif "OK" in attr_value.upper():
-                logistics_info['logistics_subtype'] = "OKMARTC2C"
-        # Check for CVS Store ID using either the English key or the Chinese label
-        elif "CvsStoreId" in attr_name or "門市代號" in attr_name:
-            logistics_info['cvs_store_id'] = attr_value
-        # Directly grab logistics subtype if available
-        elif "LogisticsSubType" in attr_name:
-            logistics_info['logistics_subtype'] = attr_value
-
-    # Fallback: if missing data, try parsing the note field
-    if not logistics_info['cvs_company'] or not logistics_info['cvs_store_id']:
-        note = order.get('note', '')
-        if note:
-            lines = [line.strip() for line in note.splitlines() if line.strip()]
-            for i, line in enumerate(lines):
-                if "超商類型" in line and "(CvsCompany)" in line:
-                    if i + 1 < len(lines):
-                        company = lines[i+1]
-                        logistics_info['cvs_company'] = company
-                        if "7-ELEVEN" in company.upper():
-                            logistics_info['logistics_subtype'] = "UNIMARTC2C"
-                        elif "全家" in company:
-                            logistics_info['logistics_subtype'] = "FAMIC2C"
-                        elif "萊爾富" in company:
-                            logistics_info['logistics_subtype'] = "HILIFEC2C"
-                        elif "OK" in company.upper():
-                            logistics_info['logistics_subtype'] = "OKMARTC2C"
-                elif "門市代號" in line and "(CvsStoreId)" in line:
-                    if i + 1 < len(lines):
-                        logistics_info['cvs_store_id'] = lines[i+1]
-                        
-    return logistics_info
 
 
 
