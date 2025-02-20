@@ -761,10 +761,6 @@ def initialize_session_state():
         st.session_state.status_filter = "All"
     if "show_preorders" not in st.session_state:
         st.session_state.show_preorders = False
-    if "orders_last_fetched" not in st.session_state:
-        st.session_state.orders_last_fetched = None
-    if "cache_expiry_seconds" not in st.session_state:
-        st.session_state.cache_expiry_seconds = 3600  # 1 hour in seconds
     if "shopify_authenticated" not in st.session_state:
         db = OrderDatabase()
         try:
@@ -845,23 +841,8 @@ def on_data_change():
 
 
 
-def fetch_and_process_orders(token, db, force_refresh=False):
-    """Fetch orders and process them into a DataFrame with caching"""
-    current_time = time.time()
-    
-    # Check if we have cached orders and they're still valid
-    if (not force_refresh and 
-        st.session_state.orders_last_fetched is not None and 
-        current_time - st.session_state.orders_last_fetched < st.session_state.cache_expiry_seconds and
-        not st.session_state.orders_df.empty):
-        
-        # Calculate time remaining until cache expires
-        time_remaining = st.session_state.cache_expiry_seconds - (current_time - st.session_state.orders_last_fetched)
-        minutes, seconds = divmod(int(time_remaining), 60)
-        st.info(f"Using cached orders. Cache refreshes in {minutes}m {seconds}s.")
-        return st.session_state.orders_df
-    
-    # If we're here, we need to fetch fresh data
+def fetch_and_process_orders(token, db):
+    """Fetch orders and process them into a DataFrame"""
     with st.spinner("Fetching orders..."):
         orders_response = get_orders(
             access_token=token["access_token"],
@@ -895,7 +876,7 @@ def fetch_and_process_orders(token, db, force_refresh=False):
         order_details_list.sort(key=lambda x: x['create_time'], reverse=True)
         st.session_state.order_details = order_details_list
 
-        # Load reference images
+         # Load reference images
         reference_images = db.get_product_images()
 
         # Process orders into DataFrame with item_spec in the tracking key
@@ -930,13 +911,6 @@ def fetch_and_process_orders(token, db, force_refresh=False):
                         "Missing": tracking['missing_count'],
                         "Note": tracking['note']
                     })
-        
-        # Update the last fetched timestamp
-        st.session_state.orders_last_fetched = current_time
-        
-        # Show success message with next refresh time
-        next_refresh = datetime.fromtimestamp(current_time + st.session_state.cache_expiry_seconds)
-        st.success(f"Orders refreshed successfully. Next refresh at {next_refresh.strftime('%H:%M:%S')}")
         
         return pd.DataFrame(orders_data)
 
@@ -1752,46 +1726,12 @@ def sidebar_controls():
     st.header("Controls")
     if st.session_state.authentication_state == "complete":
         if st.button("🔄 Refresh Orders"):
-            # Force refresh by ignoring the cache
             st.session_state.orders_need_refresh = True
             st.session_state.order_details = []
             st.session_state.orders_df = pd.DataFrame()
             st.session_state.last_edited_df = None
-            st.rerun()
+            st.rerun()  # Full rerun needed for data refresh
         
-        # Add cache control section
-        st.divider()
-        st.subheader("Cache Settings")
-        # Show current cache status
-        if st.session_state.orders_last_fetched:
-            last_fetched = datetime.fromtimestamp(st.session_state.orders_last_fetched)
-            expires_at = last_fetched + timedelta(seconds=st.session_state.cache_expiry_seconds)
-            now = datetime.now()
-            
-            if now < expires_at:
-                time_remaining = expires_at - now
-                minutes, seconds = divmod(time_remaining.seconds, 60)
-                st.info(f"Cache expires in {minutes}m {seconds}s")
-            else:
-                st.warning("Cache has expired")
-        else:
-            st.info("No cached data yet")
-            
-        # Allow user to adjust cache duration
-        new_cache_time = st.slider(
-            "Cache Duration (minutes)",
-            min_value=5,
-            max_value=240,
-            value=int(st.session_state.cache_expiry_seconds / 60),
-            step=5
-        )
-        
-        # Update cache duration if changed
-        if new_cache_time * 60 != st.session_state.cache_expiry_seconds:
-            st.session_state.cache_expiry_seconds = new_cache_time * 60
-            st.success(f"Cache duration updated to {new_cache_time} minutes")
-        
-        # Rest of existing sidebar controls
         st.divider()
         st.subheader("Filters")
         status_filter = st.selectbox(
@@ -2781,12 +2721,8 @@ def main():
         
         with platform_tabs[0]:
             if st.session_state.orders_need_refresh:
-                # Pass force_refresh=True when the refresh button is clicked
-                st.session_state.orders_df = fetch_and_process_orders(token, db, force_refresh=True)
-                st.session_state.orders_need_refresh = False
-            else:
-                # Normal cached fetch
                 st.session_state.orders_df = fetch_and_process_orders(token, db)
+                st.session_state.orders_need_refresh = False
 
             if not st.session_state.orders_df.empty:
                 filtered_df = apply_filters(
