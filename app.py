@@ -1536,7 +1536,7 @@ def fetch_and_process_shopify_orders(credentials, db):
 
 
 def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None):
-    """Enhanced Shopify order editing function with improved logistics info display"""
+    """Enhanced Shopify order editing function with explicit CVS store ID handling"""
     all_received = all(order_data['Received'])
     status_emoji = "✅" if all_received else "⚠️" if any(order_data['Received']) else "❌"
     
@@ -1576,12 +1576,35 @@ def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None
                                       logistics_info.get('cvs_company', 'N/A'))
                         
                         with col2:
-                            st.metric("門市代號 (Store ID)", 
-                                      logistics_info.get('cvs_store_id', 'N/A'))
+                            # Special handling for store ID
+                            store_id = logistics_info.get('cvs_store_id', 'N/A')
+                            
+                            # Custom input for store ID
+                            updated_store_id = st.text_input(
+                                "門市代號 (Store ID)", 
+                                value=store_id, 
+                                key=f"store_id_input_{unique_key}"
+                            )
+                            
+                            # If store ID is updated, you might want to save this back to the order
+                            if updated_store_id != store_id:
+                                st.success(f"Store ID updated to: {updated_store_id}")
+                                # Here you would add logic to save the updated store ID back to Shopify
+                                # This might involve using Shopify's API to update the order's note attributes
                         
                         with col3:
                             st.metric("物流子類型 (Logistics Subtype)", 
                                       logistics_info.get('logistics_subtype', 'N/A'))
+                        
+                        # Additional store details
+                        with st.expander("門市詳細資訊 (Store Details)"):
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.write(f"門市名稱 (Store Name): {logistics_info.get('store_name', 'N/A')}")
+                                st.write(f"門市城市 (Store City): {logistics_info.get('store_city', 'N/A')}")
+                            with col2:
+                                st.write(f"門市地址 (Store Address): {logistics_info.get('store_address', 'N/A')}")
+                                st.write(f"門市郵遞區號 (Store Zip): {logistics_info.get('store_zip', 'N/A')}")
                         
                         # Original ECPay flow
                         st.success("成功取得訂單資料")
@@ -1594,7 +1617,7 @@ def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None
                     st.error(f"處理訂單資料時發生錯誤: {str(e)}")
                     st.exception(e)  # Show full exception details
         
-        # Additional context display
+        # Rest of the existing function remains the same...
         st.write(f"Shipping Address: {order_data['Shipping Address'].iloc[0]}")
         
         # Create order editor with unique key
