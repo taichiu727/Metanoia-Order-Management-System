@@ -1785,7 +1785,7 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
     
     with st.expander(f"Order: {order_num} {status_emoji}", expanded=True):
         # Add shipping controls
-        col1, col2, col3 = st.columns([2, 1, 1])
+        col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
         with col2:
             if st.button("出貨 🚚", key=f"ship_{unique_key}"):
                 token = check_token_validity(db)
@@ -1892,6 +1892,47 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
                     st.error("Invalid token. Please re-authenticate.")
 
         with col3:
+            if st.button("出貨號碼 🚛", key=f"ship_tracking_{unique_key}"):
+                token = check_token_validity(db)
+                if token:
+                    # Ship the order
+                    with st.spinner("Shipping order..."):
+                        shipping_response = ship_order(
+                            access_token=token["access_token"],
+                            client_id=CLIENT_ID,
+                            client_secret=CLIENT_SECRET,
+                            shop_id=SHOP_ID,
+                            order_sn=order_num
+                        )
+                        
+                        if shipping_response:
+                            # Get tracking number only
+                            with st.spinner("Getting tracking number..."):
+                                tracking_number = None
+                                max_attempts = 3
+                                for attempt in range(max_attempts):
+                                    tracking_data = get_tracking_number(
+                                        access_token=token["access_token"],
+                                        client_id=CLIENT_ID,
+                                        client_secret=CLIENT_SECRET,
+                                        shop_id=SHOP_ID,
+                                        order_sn=order_num
+                                    )
+                                    if tracking_data and tracking_data.get("response", {}).get("tracking_number"):
+                                        tracking_number = tracking_data["response"]["tracking_number"]
+                                        st.success(f"Order shipped! 📦\nTracking number: {tracking_number}")
+                                        break
+                                    if attempt < max_attempts - 1:
+                                        time.sleep(5)
+                                
+                                if not tracking_number:
+                                    st.warning("Order shipped but couldn't retrieve tracking number.")
+                        else:
+                            st.error("Failed to ship order.")
+                else:
+                    st.error("Invalid token. Please re-authenticate.")
+
+        with col4:
             if st.button("列印 🖨️", key=f"print_{unique_key}"):
                 token = check_token_validity(db)
                 if token:
@@ -2001,8 +2042,6 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
                 else:
                     st.error("Invalid token. Please re-authenticate.")
 
-
-
         editor_key = f"editor_{unique_key}"
 
         # Add Reference Images to display data
@@ -2017,16 +2056,9 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
         # Add Reference Image column
         display_data["Reference Image"] = display_data["Item Number"].apply(format_reference_image)
         
-       
-        
-        
         display_data = display_data[["Order Number", "Created", "Deadline", "Product", 
                                    "Item Spec", "Item Number", "Quantity", "Image", 
                                    "Reference Image", "Received", "Missing", "Note", "Tag"]]
-
-        #display_data = order_data[["Order Number", "Created", "Deadline", "Product", 
-        #                        "Item Spec", "Item Number", "Quantity", "Image", 
-         #                       "Reference Image", "Received", "Missing", "Note", "Tag"]]
         
         def highlight_quantity(df):
             """
@@ -2097,11 +2129,6 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
                         st.session_state.reference_images[sku] = processed_image
                         # Show success message
                         st.success(f"Image updated for {sku}")
-                        # Trigger a rerun to show the updated image 
-                        
-                        
-                       
-                       
         
         if editor_key in st.session_state and "edited_rows" in st.session_state[editor_key]:
             edited_rows = st.session_state[editor_key]["edited_rows"]
