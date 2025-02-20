@@ -319,18 +319,48 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
 
 
 def shopify_ecpay_ui(order, db):
-    """ECPay logistics UI for Shopify orders
+    """Enhanced ECPay logistics UI for Shopify orders
     
     Args:
         order (dict): Shopify order data
         db: Database connection
     """
+    # Logistics options mapping
     logistics_options = {
         "UNIMARTC2C": "7-ELEVEN 超商交貨便",
         "FAMIC2C": "全家店到店",
         "HILIFEC2C": "萊爾富店到店",
         "OKMARTC2C": "OK超商店到店"
     }
+    
+    # Extract logistics information from note attributes
+    def extract_note_attribute(attributes, key_patterns):
+        for attr in attributes:
+            attr_name = attr.get('name', '').lower()
+            for pattern in key_patterns:
+                if pattern in attr_name:
+                    return str(attr.get('value', '')).strip()
+        return ''
+    
+    # Get note attributes
+    note_attributes = order.get('note_attributes', [])
+    
+    # Pre-fill logistics information
+    pre_selected_logistics = extract_note_attribute(
+        note_attributes, 
+        ['物流子代碼', 'logisticssubtype', 'logistics_subtype']
+    ) or "UNIMARTC2C"
+    
+    # Store ID extraction (try multiple methods)
+    store_id = (
+        extract_note_attribute(note_attributes, ['門市代號', 'cvsstoreid', 'store_id']) or 
+        next((
+            prop.get('value', '') 
+            for item in order.get('line_items', []) 
+            for prop in item.get('properties', []) 
+            if prop.get('name', '').lower() in ['cvs_store_id', '門市代號']
+        ), '')
+    )
     
     with st.container():
         # Get customer info
@@ -353,14 +383,17 @@ def shopify_ecpay_ui(order, db):
         
         with col2:
             st.subheader("物流設定")
+            # Pre-select the logistics type based on extracted information
             selected_logistics = st.selectbox(
                 "物流類型",
                 options=list(logistics_options.keys()),
+                index=list(logistics_options.keys()).index(pre_selected_logistics),
                 format_func=lambda x: logistics_options[x],
                 key=f"logistics_{order['order_number']}"
             )
             
-            store_id = st.text_input("門市代號", key=f"store_{order['order_number']}")
+            # Pre-fill store ID
+            store_id = st.text_input("門市代號", value=store_id, key=f"store_{order['order_number']}")
             
             goods_amount = st.number_input(
                 "商品金額",
