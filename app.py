@@ -1560,7 +1560,7 @@ def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None
                     order_details = get_shopify_order_details(
                         shop_url=credentials['shop_url'],
                         access_token=credentials['access_token'],
-                        order_id=order_num
+                        order_num=order_num
                     )
                     
                     if order_details:
