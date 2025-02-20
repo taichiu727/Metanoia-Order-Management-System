@@ -19,6 +19,13 @@ import json
 from PIL import Image
 from io import BytesIO
 import base64
+from ecpay_integration import ECPayLogistics, ECPayDatabase, set_ecpay_credentials
+from ecpay_ui import (
+    settings_ui, 
+    shopify_ecpay_ui, 
+    shopee_ecpay_ui, 
+    init_ecpay_session
+)
 
 # Database Configuration
 DATABASE_URL = "postgresql://neondb_owner:npg_r9iSFwQd4zAT@ep-white-sky-a1mrgmyd-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require"
@@ -104,6 +111,9 @@ class OrderDatabase:
             """)
             self.conn.commit()
             
+            ecpay_db = ECPayDatabase(self.conn)
+            ecpay_db.init_tables()
+            self.conn.commit()
 
             # New shopee_token table
             self.cursor.execute("""
@@ -740,7 +750,7 @@ def initialize_session_state():
             st.session_state.authentication_state = "complete"
         else:
             st.session_state.authentication_state = "initial"
-    
+    init_ecpay_session()
     # Initialize all required session state variables
      # Tab management
     if "active_tab" not in st.session_state:
@@ -761,6 +771,7 @@ def initialize_session_state():
         st.session_state.status_filter = "All"
     if "show_preorders" not in st.session_state:
         st.session_state.show_preorders = False
+    
     if "shopify_authenticated" not in st.session_state:
         db = OrderDatabase()
         try:
@@ -1528,13 +1539,36 @@ def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None
     
     with st.expander(f"Order: {order_num} {status_emoji}", expanded=True):
         # Show order details
-        col1, col2, col3 = st.columns([2, 2, 1])
+        col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
         with col1:
             st.write(f"Customer: {order_data['Customer'].iloc[0]}")
         with col2:
             st.write(f"Created: {order_data['Created'].iloc[0]}")
         with col3:
             st.write(f"Status: {order_data['Financial Status'].iloc[0].title()}")
+        with col4:
+            if st.button("ECPay 物流", key=f"ecpay_{unique_key}"):
+                # Find the original order in the filtered DataFrame
+                order_info = None
+                for idx, row in filtered_df.iterrows():
+                    if str(row["Order Number"]) == str(order_num):
+                        order_info = row
+                        break
+                
+                if order_info is not None:
+                    # Get order details from Shopify
+                    order_details = get_shopify_order_details(
+                        shop_url=st.session_state.shopify_credentials['shop_url'],
+                        access_token=st.session_state.shopify_credentials['access_token'],
+                        order_id=order_num
+                    )
+                    if order_details:
+                        ecpay_db = ECPayDatabase(db.conn)
+                        shopify_ecpay_ui(order_details, ecpay_db)
+                    else:
+                        st.error("無法取得訂單詳細資料")
+                else:
+                    st.error("找不到訂單資料")
         
         st.write(f"Shipping Address: {order_data['Shipping Address'].iloc[0]}")
         
@@ -1570,6 +1604,31 @@ def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None
         
         # Handle changes
         handle_shopify_editor_changes(editor_key, edited_df, filtered_df, db)
+
+def get_shopify_order_details(shop_url, access_token, order_id):
+    """Fetch detailed order information from Shopify
+    
+    Args:
+        shop_url (str): Shopify shop URL
+        access_token (str): Shopify access token
+        order_id (str): Order ID
+        
+    Returns:
+        dict: Order details or None on error
+    """
+    try:
+        # Build the URL for getting a specific order
+        url = f"https://{shop_url}/admin/api/2024-01/orders/{order_id}.json"
+        headers = {'X-Shopify-Access-Token': access_token}
+        
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        
+        data = response.json()
+        return data.get('order')
+    except Exception as e:
+        print(f"Error fetching Shopify order details: {str(e)}")
+        return None
 
 @st.fragment
 def shopify_orders_table(filtered_df, section_key=""):
@@ -2819,6 +2878,8 @@ def main():
                 except Exception as e:
                     st.error(f"Error disconnecting Shopify: {str(e)}")
         
+        ecpay_db = ECPayDatabase(db.conn)
+        settings_ui(ecpay_db)
         # Add divider between settings sections
         st.divider()
         
