@@ -317,7 +317,7 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
             except Exception as e:
                 st.error(f"建立物流單時發生錯誤: {str(e)}")
 
-
+@st.fragment
 def shopify_ecpay_ui(order, db):
     """Simple ECPay logistics UI for Shopify orders
     
