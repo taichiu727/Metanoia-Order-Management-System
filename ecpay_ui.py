@@ -319,129 +319,153 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
 
 
 def shopify_ecpay_ui(order, db):
-    """Optimized ECPay logistics UI for Shopify orders
+    """Simple ECPay logistics UI for Shopify orders
     
     Args:
         order (dict): Shopify order data
         db: Database connection
     """
-    # Cached logistics options for performance
-    LOGISTICS_OPTIONS = {
+    # Logistics options
+    logistics_options = {
         "UNIMARTC2C": "7-ELEVEN 超商交貨便",
         "FAMIC2C": "全家店到店",
         "HILIFEC2C": "萊爾富店到店",
         "OKMARTC2C": "OK超商店到店"
     }
     
-    # Efficient attribute extraction
-    def extract_attribute(attributes, keys):
-        """Efficiently extract first matching attribute value"""
+    # Helper function to extract attribute
+    def get_note_attribute(attributes, key_patterns):
         for attr in attributes:
             attr_name = attr.get('name', '').lower()
-            for key in keys:
-                if key in attr_name:
+            for pattern in key_patterns:
+                if pattern in attr_name:
                     return str(attr.get('value', '')).strip()
         return ''
     
-    # Prepare customer and shipping information
+    # Prepare customer and order information
     customer = order.get('customer', {})
     shipping_address = order.get('shipping_address', {})
+    note_attributes = order.get('note_attributes', [])
     
-    # Efficient customer name compilation
+    # Compile customer name
     customer_name = (
         f"{customer.get('first_name', '')} {customer.get('last_name', '')}"
     ).strip()
     
-    # Extract logistics information
-    note_attributes = order.get('note_attributes', [])
-    
-    # Identify logistics details with efficient extraction
-    selected_logistics = extract_attribute(
+    # Extract logistics details
+    selected_logistics = get_note_attribute(
         note_attributes, 
         ['物流子代碼', 'logisticssubtype', 'logistics_subtype']
     ) or "UNIMARTC2C"
     
-    # Store ID extraction with multiple fallback methods
-    store_id = (
-        extract_attribute(note_attributes, ['門市代號', 'cvsstoreid', 'store_id']) or 
-        next((
-            prop.get('value', '') 
-            for item in order.get('line_items', []) 
-            for prop in item.get('properties', []) 
-            if prop.get('name', '').lower() in ['cvs_store_id', '門市代號']
-        ), '')
-    )
+    # Extract store ID
+    store_id = get_note_attribute(
+        note_attributes, 
+        ['門市代號', 'cvsstoreid', 'store_id']
+    ) or ''
     
-    # Compute total amount once
+    # Compute total amount
     total_amount = int(float(order.get('total_price', '0')))
     
-    # Prepare concise goods description
+    # Prepare goods description
     line_items = order.get('line_items', [])
     items_desc = ", ".join([f"{item['title']} x {item['quantity']}" for item in line_items[:3]])
     if len(line_items) > 3:
         items_desc += f" 等{len(line_items)}項商品"
     
-    # Trim description to maximum allowed length
+    # Trim description
     items_desc = (items_desc[:47] + "...") if len(items_desc) > 47 else items_desc
     
     # UI Layout
     with st.container():
-        col1, col2 = st.columns(2)
+        st.header(f"訂單 #{order['order_number']} 物流資訊")
+        
+        # Receiver Information
+        st.subheader("收件人資訊")
+        col1, col2, col3 = st.columns(3)
         
         with col1:
-            st.subheader("收件人資訊")
+            st.write("**收件人姓名**")
             receiver_name = st.text_input(
-                "收件人姓名", 
+                "姓名", 
                 value=customer_name, 
+                label_visibility="collapsed",
                 key=f"name_{order['order_number']}"
-            )
-            receiver_phone = st.text_input(
-                "收件人電話", 
-                value=shipping_address.get('phone', ''), 
-                key=f"phone_{order['order_number']}"
-            )
-            receiver_email = st.text_input(
-                "收件人 Email", 
-                value=order.get('email', ''), 
-                key=f"email_{order['order_number']}"
             )
         
         with col2:
-            st.subheader("物流設定")
+            st.write("**收件人電話**")
+            receiver_phone = st.text_input(
+                "電話", 
+                value=shipping_address.get('phone', ''), 
+                label_visibility="collapsed",
+                key=f"phone_{order['order_number']}"
+            )
+        
+        with col3:
+            st.write("**收件人 Email**")
+            receiver_email = st.text_input(
+                "Email", 
+                value=order.get('email', ''), 
+                label_visibility="collapsed",
+                key=f"email_{order['order_number']}"
+            )
+        
+        # Logistics Information
+        st.subheader("物流設定")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.write("**物流類型**")
             selected_logistics = st.selectbox(
                 "物流類型",
-                options=list(LOGISTICS_OPTIONS.keys()),
-                index=list(LOGISTICS_OPTIONS.keys()).index(selected_logistics),
-                format_func=lambda x: LOGISTICS_OPTIONS[x],
+                options=list(logistics_options.keys()),
+                index=list(logistics_options.keys()).index(selected_logistics),
+                format_func=lambda x: logistics_options[x],
+                label_visibility="collapsed",
                 key=f"logistics_{order['order_number']}"
             )
-            
+        
+        with col2:
+            st.write("**門市代號**")
             store_id = st.text_input(
                 "門市代號", 
                 value=store_id, 
+                label_visibility="collapsed",
                 key=f"store_{order['order_number']}"
             )
-            
+        
+        with col3:
+            st.write("**商品金額**")
             goods_amount = st.number_input(
                 "商品金額",
                 min_value=1, 
                 max_value=20000,
                 value=total_amount,
+                label_visibility="collapsed",
                 key=f"amount_{order['order_number']}"
             )
-            
+        
+        # Additional Options
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("**商品描述**")
+            goods_name = st.text_input(
+                "商品描述",
+                value=items_desc,
+                max_chars=50,
+                label_visibility="collapsed",
+                key=f"goods_{order['order_number']}"
+            )
+        
+        with col2:
+            st.write("**代收貨款**")
             is_collection = st.checkbox(
                 "代收貨款",
                 value=False,
                 key=f"collection_{order['order_number']}"
             )
-        
-        goods_name = st.text_input(
-            "商品描述",
-            value=items_desc,
-            max_chars=50,
-            key=f"goods_{order['order_number']}"
-        )
         
         # Prepare callback URL
         shopify_domain = order.get('shopify_domain', 'your-store.myshopify.com')
@@ -465,6 +489,7 @@ def shopify_ecpay_ui(order, db):
         }
         
         # Render ECPay button
+        st.write("---")
         render_ecpay_button(
             order_id=str(order['order_number']),
             platform="shopify",
