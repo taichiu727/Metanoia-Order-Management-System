@@ -27,11 +27,7 @@ from ecpay_ui import (
     shopee_ecpay_ui, 
     init_ecpay_session
 )
-try:
-   from ecpay_integration import ECPayLogistics
-   print("Successfully imported ECPayLogistics")
-except Exception as e:
-   print(f"Import error: {e}")
+
 
 
 # Database Configuration
@@ -1555,27 +1551,28 @@ def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None
             st.write(f"Status: {order_data['Financial Status'].iloc[0].title()}")
         with col4:
             if st.button("ECPay 物流", key=f"ecpay_{unique_key}"):
-                # Find the original order in the filtered DataFrame
-                order_info = None
-                for idx, row in filtered_df.iterrows():
-                    if str(row["Order Number"]) == str(order_num):
-                        order_info = row
-                        break
+                st.info(f"正在處理訂單 #{order_num}...")
+                credentials = st.session_state.shopify_credentials
+                st.write(f"Shop URL: {credentials['shop_url']}")
                 
-                if order_info is not None:
+                try:
                     # Get order details from Shopify
                     order_details = get_shopify_order_details(
-                        shop_url=st.session_state.shopify_credentials['shop_url'],
-                        access_token=st.session_state.shopify_credentials['access_token'],
+                        shop_url=credentials['shop_url'],
+                        access_token=credentials['access_token'],
                         order_id=order_num
                     )
+                    
                     if order_details:
+                        st.success("成功取得訂單資料")
                         ecpay_db = ECPayDatabase(db.conn)
                         shopify_ecpay_ui(order_details, ecpay_db)
                     else:
-                        st.error("無法取得訂單詳細資料")
-                else:
-                    st.error("找不到訂單資料")
+                        st.error(f"無法取得訂單詳細資料 (#{order_num})")
+                        st.error("可能的原因: 1) 訂單不存在 2) 權限不足 3) API限制達到上限")
+                except Exception as e:
+                    st.error(f"處理訂單資料時發生錯誤: {str(e)}")
+                    st.exception(e)  # Show full exception details
         
         st.write(f"Shipping Address: {order_data['Shipping Address'].iloc[0]}")
         
@@ -1618,23 +1615,43 @@ def get_shopify_order_details(shop_url, access_token, order_id):
     Args:
         shop_url (str): Shopify shop URL
         access_token (str): Shopify access token
-        order_id (str): Order ID
+        order_id (str): Order ID or number
         
     Returns:
         dict: Order details or None on error
     """
     try:
-        # Build the URL for getting a specific order
-        url = f"https://{shop_url}/admin/api/2024-01/orders/{order_id}.json"
+        # Check if we have a numeric ID or an order number
+        is_numeric = str(order_id).isdigit()
+        
+        if is_numeric:
+            # If it's a numeric ID, use it directly
+            url = f"https://{shop_url}/admin/api/2024-01/orders/{order_id}.json"
+        else:
+            # Otherwise, search by order number
+            url = f"https://{shop_url}/admin/api/2024-01/orders.json?name={order_id}"
+            
         headers = {'X-Shopify-Access-Token': access_token}
         
         response = requests.get(url, headers=headers)
         response.raise_for_status()
         
         data = response.json()
-        return data.get('order')
+        
+        if is_numeric:
+            return data.get('order')
+        else:
+            # Find the matching order by name/number
+            orders = data.get('orders', [])
+            for order in orders:
+                if str(order.get('name', '')).replace('#', '') == str(order_id).replace('#', ''):
+                    # Add shop domain to order data for callback URL
+                    order['shopify_domain'] = shop_url
+                    return order
+            return None
+            
     except Exception as e:
-        print(f"Error fetching Shopify order details: {str(e)}")
+        st.error(f"Error fetching Shopify order details: {str(e)}")
         return None
 
 @st.fragment
