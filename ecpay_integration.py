@@ -9,7 +9,7 @@ import re
 import streamlit as st
 
 # ECPay Environment Configuration
-ECPAY_ENV = "test"  # Change to "production" for live environment
+ECPAY_ENV = "production"  # Change to "production" for live environment
 ECPAY_CONFIG = {
     "test": {
         "create_order": "https://logistics-stage.ecpay.com.tw/Express/Create",

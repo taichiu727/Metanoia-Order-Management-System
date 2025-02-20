@@ -79,7 +79,7 @@ def settings_ui(db):
         
         with col2:
             if ecpay_db:
-                test_conn = st.form_submit_button("測試連線", use_container_width=True)
+                test_conn_button = st.form_submit_button("測試連線", use_container_width=True)
             
         if submit:
             # Validate inputs
@@ -128,7 +128,7 @@ def settings_ui(db):
             else:
                 st.error("儲存設定時發生錯誤")
         
-        elif test_conn and ecpay_db:
+        elif test_conn_button and ecpay_db:
             try:
                 # Prepare test order data
                 test_order = {
