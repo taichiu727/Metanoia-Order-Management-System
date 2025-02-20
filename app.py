@@ -1609,46 +1609,48 @@ def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None
         # Handle changes
         handle_shopify_editor_changes(editor_key, edited_df, filtered_df, db)
 
-def get_shopify_order_details(shop_url, access_token, order_id):
+def get_shopify_order_details(shop_url, access_token, order_num):
     """Fetch detailed order information from Shopify
     
     Args:
         shop_url (str): Shopify shop URL
         access_token (str): Shopify access token
-        order_id (str): Order ID or number
+        order_num (str): Order number (visible to customers)
         
     Returns:
         dict: Order details or None on error
     """
     try:
-        # Check if we have a numeric ID or an order number
-        is_numeric = str(order_id).isdigit()
-        
-        if is_numeric:
-            # If it's a numeric ID, use it directly
-            url = f"https://{shop_url}/admin/api/2024-01/orders/{order_id}.json"
-        else:
-            # Otherwise, search by order number
-            url = f"https://{shop_url}/admin/api/2024-01/orders.json?name={order_id}"
-            
+        # First, get a list of orders by name (order number)
+        clean_order_num = str(order_num).replace('#', '')
+        url = f"https://{shop_url}/admin/api/2024-01/orders.json?name={clean_order_num}&status=any"
         headers = {'X-Shopify-Access-Token': access_token}
         
         response = requests.get(url, headers=headers)
         response.raise_for_status()
         
-        data = response.json()
+        orders = response.json().get('orders', [])
         
-        if is_numeric:
-            return data.get('order')
-        else:
-            # Find the matching order by name/number
-            orders = data.get('orders', [])
-            for order in orders:
-                if str(order.get('name', '')).replace('#', '') == str(order_id).replace('#', ''):
-                    # Add shop domain to order data for callback URL
-                    order['shopify_domain'] = shop_url
-                    return order
-            return None
+        # Look for a matching order
+        for order in orders:
+            order_name = str(order.get('name', '')).replace('#', '')
+            if order_name == clean_order_num:
+                # Add shop domain to order data for callback URL
+                order['shopify_domain'] = shop_url
+                return order
+                
+        # If no match found, try direct lookup if order_num looks like an ID
+        if str(order_num).isdigit() and len(str(order_num)) > 10:
+            direct_url = f"https://{shop_url}/admin/api/2024-01/orders/{order_num}.json"
+            direct_response = requests.get(direct_url, headers=headers)
+            if direct_response.status_code == 200:
+                order_data = direct_response.json().get('order')
+                if order_data:
+                    order_data['shopify_domain'] = shop_url
+                    return order_data
+                    
+        # If we got here, we couldn't find the order
+        return None
             
     except Exception as e:
         st.error(f"Error fetching Shopify order details: {str(e)}")
