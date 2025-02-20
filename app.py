@@ -9,6 +9,7 @@ from shopee_oauth import (
     CLIENT_SECRET,
     SHOP_ID
 )
+
 import requests
 import hashlib
 import time
@@ -26,6 +27,12 @@ from ecpay_ui import (
     shopee_ecpay_ui, 
     init_ecpay_session
 )
+try:
+   from ecpay_integration import ECPayLogistics
+   print("Successfully imported ECPayLogistics")
+except Exception as e:
+   print(f"Import error: {e}")
+
 
 # Database Configuration
 DATABASE_URL = "postgresql://neondb_owner:npg_r9iSFwQd4zAT@ep-white-sky-a1mrgmyd-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require"
