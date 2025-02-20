@@ -5,93 +5,100 @@ import json
 from ecpay_integration import ECPayLogistics, ECPAY_ENV, set_ecpay_credentials
 
 def settings_ui(db):
-    """ECPay settings UI component
+    """ECPay settings UI component with Streamlit secrets support
     
     Args:
         db: Database connection object
     """
     st.subheader("ECPay 綠界科技設定")
     
-    # Try to load existing credentials
-    ecpay_db = db.get_credentials()
-    if ecpay_db:
-        st.success("✅ ECPay 已連接")
-        st.info(f"商店代號: {ecpay_db['merchant_id']} (環境: {'測試' if ecpay_db['environment'] == 'test' else '正式'})")
-        
-        # Load credentials to global variables
-        set_ecpay_credentials(
-            ecpay_db['merchant_id'],
-            ecpay_db['hash_key'],
-            ecpay_db['hash_iv'],
-            ecpay_db['environment']
-        )
+    # Load credentials from Streamlit secrets
+    merchant_id = st.secrets.get("ECPAY_MERCHANT_ID")
+    hash_key = st.secrets.get("ECPAY_HASH_KEY")
+    hash_iv = st.secrets.get("ECPAY_HASH_IV")
     
-    # Declare variables outside the form so they're accessible later
-    merchant_id = ""
-    hash_key = ""
-    hash_iv = ""
-    environment = "test"
+    # Initial state for sender info and environment
     sender_name = ""
     sender_phone = ""
     sender_address = ""
+    environment = "test"
+    
+    # Try to load existing sender info from database
+    ecpay_db = db.get_credentials()
+    if ecpay_db:
+        sender_name = ecpay_db.get('sender_name', '')
+        sender_phone = ecpay_db.get('sender_phone', '')
+        sender_address = ecpay_db.get('sender_address', '')
+    
+    # Display connection status
+    if merchant_id and hash_key and hash_iv:
+        st.success("✅ ECPay 憑證已載入")
+        st.info(f"商店代號: {merchant_id} (環境: {'測試' if environment == 'test' else '正式'})")
+        
+        # Set credentials globally
+        set_ecpay_credentials(merchant_id, hash_key, hash_iv, environment)
+    else:
+        st.error("未找到 ECPay 憑證，請檢查 Streamlit 密鑰設定")
     
     # Settings form
     with st.form("ecpay_settings"):
         col1, col2 = st.columns(2)
         
         with col1:
-            merchant_id = st.text_input(
+            st.write("### 系統憑證 (自 Streamlit Secrets)")
+            st.text_input(
                 "商店代號 (MerchantID)", 
-                value=ecpay_db['merchant_id'] if ecpay_db else "",
-                help="綠界科技提供的特店編號"
+                value=merchant_id or "",
+                disabled=True,
+                help="從 Streamlit Secrets 載入，無法直接編輯"
             )
-            hash_key = st.text_input(
+            st.text_input(
                 "HashKey", 
-                value=ecpay_db['hash_key'] if ecpay_db else "",
+                value="*" * len(hash_key) if hash_key else "",
                 type="password",
-                help="綠界科技提供的 HashKey"
+                disabled=True,
+                help="從 Streamlit Secrets 載入，無法直接編輯"
             )
-            hash_iv = st.text_input(
+            st.text_input(
                 "HashIV", 
-                value=ecpay_db['hash_iv'] if ecpay_db else "",
+                value="*" * len(hash_iv) if hash_iv else "",
                 type="password",
-                help="綠界科技提供的 HashIV"
+                disabled=True,
+                help="從 Streamlit Secrets 載入，無法直接編輯"
             )
-            environment = st.selectbox(
+            
+            # Hidden environment selection since using secrets
+            st.selectbox(
                 "環境",
                 options=["test", "production"],
-                index=0 if not ecpay_db or ecpay_db['environment'] == 'test' else 1,
-                format_func=lambda x: "測試環境" if x == "test" else "正式環境"
+                index=0,
+                format_func=lambda x: "測試環境" if x == "test" else "正式環境",
+                disabled=True
             )
         
         with col2:
             st.subheader("預設寄件人資訊")
             sender_name = st.text_input(
                 "寄件人姓名",
-                value=ecpay_db['sender_name'] if ecpay_db and ecpay_db['sender_name'] else "",
+                value=sender_name,
                 help="4-10個字元，不可有數字或特殊符號"
             )
             sender_phone = st.text_input(
                 "寄件人手機",
-                value=ecpay_db['sender_phone'] if ecpay_db and ecpay_db['sender_phone'] else "",
+                value=sender_phone,
                 help="手機號碼格式，例如: 0912345678"
             )
             sender_address = st.text_area(
                 "寄件人地址",
-                value=ecpay_db['sender_address'] if ecpay_db and ecpay_db['sender_address'] else "",
+                value=sender_address,
                 height=100
             )
         
         st.write("---")
         submit = st.form_submit_button("儲存設定", use_container_width=True)
     
-    # Handle form submission outside the form
+    # Handle form submission
     if submit:
-        # Validate inputs
-        if not merchant_id or not hash_key or not hash_iv:
-            st.error("請填寫所有必要欄位")
-            return
-        
         # Validate sender name (4-10 characters, no numbers or special chars)
         if sender_name:
             if len(sender_name) < 2 or len(sender_name) > 10:
@@ -112,29 +119,20 @@ def settings_ui(db):
             st.error("寄件人手機必須是10位數字且以09開頭")
             return
         
-        # Save to database
-        success = db.save_credentials(
-            merchant_id=merchant_id,
-            hash_key=hash_key, 
-            hash_iv=hash_iv,
-            environment=environment,
-            sender_info={
-                "name": sender_name,
-                "phone": sender_phone,
-                "address": sender_address
-            }
-        )
+        # Save sender info to database
+        success = db.save_sender_info({
+            "name": sender_name,
+            "phone": sender_phone,
+            "address": sender_address
+        })
         
         if success:
-            # Update global variables
-            set_ecpay_credentials(merchant_id, hash_key, hash_iv, environment)
-            st.success("設定已儲存！")
-            st.rerun()
+            st.success("寄件人資訊已儲存！")
         else:
             st.error("儲存設定時發生錯誤")
     
     # Separate test connection functionality
-    if ecpay_db:
+    if merchant_id and hash_key and hash_iv:
         st.divider()
         col1, col2 = st.columns([3, 1])
         with col2:
@@ -150,8 +148,8 @@ def settings_ui(db):
                     "LogisticsSubType": "UNIMARTC2C",  # 7-ELEVEN C2C
                     "GoodsAmount": 100,
                     "GoodsName": "測試商品",
-                    "SenderName": ecpay_db.get('sender_name') or "測試寄件人",
-                    "SenderCellPhone": ecpay_db.get('sender_phone') or "0912345678",
+                    "SenderName": sender_name or "測試寄件人",
+                    "SenderCellPhone": sender_phone or "0912345678",
                     "ReceiverName": "測試收件人",
                     "ReceiverCellPhone": "0987654321",
                     "ReceiverStoreID": "131386",  # 測試門市
@@ -159,12 +157,7 @@ def settings_ui(db):
                 }
                 
                 # Set credentials
-                set_ecpay_credentials(
-                    ecpay_db['merchant_id'],
-                    ecpay_db['hash_key'],
-                    ecpay_db['hash_iv'],
-                    ecpay_db['environment']
-                )
+                set_ecpay_credentials(merchant_id, hash_key, hash_iv, "test")
                 
                 # Test API connection
                 st.info("正在測試連線...")
