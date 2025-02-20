@@ -26,6 +26,16 @@ def settings_ui(db):
             ecpay_db['environment']
         )
     
+    # Declare variables outside the form so they're accessible later
+    merchant_id = ""
+    hash_key = ""
+    hash_iv = ""
+    environment = "test"
+    sender_name = ""
+    sender_phone = ""
+    sender_address = ""
+    
+    # Settings form
     with st.form("ecpay_settings"):
         col1, col2 = st.columns(2)
         
@@ -73,62 +83,64 @@ def settings_ui(db):
             )
         
         st.write("---")
-        col1, col2 = st.columns(2)
-        with col1:
-            submit = st.form_submit_button("儲存設定", use_container_width=True)
+        submit = st.form_submit_button("儲存設定", use_container_width=True)
+    
+    # Handle form submission outside the form
+    if submit:
+        # Validate inputs
+        if not merchant_id or not hash_key or not hash_iv:
+            st.error("請填寫所有必要欄位")
+            return
         
-        with col2:
-            if ecpay_db:
-                test_conn_button = st.form_submit_button("測試連線", use_container_width=True)
-            
-        if submit:
-            # Validate inputs
-            if not merchant_id or not hash_key or not hash_iv:
-                st.error("請填寫所有必要欄位")
+        # Validate sender name (4-10 characters, no numbers or special chars)
+        if sender_name:
+            if len(sender_name) < 2 or len(sender_name) > 10:
+                st.error("寄件人姓名需要2-10個字")
                 return
-            
-            # Validate sender name (4-10 characters, no numbers or special chars)
-            if sender_name:
-                if len(sender_name) < 2 or len(sender_name) > 10:
-                    st.error("寄件人姓名需要2-10個字")
-                    return
-                    
-                if any(char.isdigit() for char in sender_name):
-                    st.error("寄件人姓名不可包含數字")
-                    return
                 
-                # Simple regex for special characters
-                if not all(('\u4e00' <= char <= '\u9fff') or char.isalpha() or char.isspace() for char in sender_name):
-                    st.error("寄件人姓名不可包含特殊符號")
-                    return
-            
-            # Validate phone (must be 10 digits starting with 09)
-            if sender_phone and (len(sender_phone) != 10 or not sender_phone.startswith("09") or not sender_phone.isdigit()):
-                st.error("寄件人手機必須是10位數字且以09開頭")
+            if any(char.isdigit() for char in sender_name):
+                st.error("寄件人姓名不可包含數字")
                 return
             
-            # Save to database
-            success = db.save_credentials(
-                merchant_id=merchant_id,
-                hash_key=hash_key, 
-                hash_iv=hash_iv,
-                environment=environment,
-                sender_info={
-                    "name": sender_name,
-                    "phone": sender_phone,
-                    "address": sender_address
-                }
-            )
-            
-            if success:
-                # Update global variables
-                set_ecpay_credentials(merchant_id, hash_key, hash_iv, environment)
-                st.success("設定已儲存！")
-                st.rerun()
-            else:
-                st.error("儲存設定時發生錯誤")
+            # Simple regex for special characters
+            if not all(('\u4e00' <= char <= '\u9fff') or char.isalpha() or char.isspace() for char in sender_name):
+                st.error("寄件人姓名不可包含特殊符號")
+                return
         
-        elif test_conn_button and ecpay_db:
+        # Validate phone (must be 10 digits starting with 09)
+        if sender_phone and (len(sender_phone) != 10 or not sender_phone.startswith("09") or not sender_phone.isdigit()):
+            st.error("寄件人手機必須是10位數字且以09開頭")
+            return
+        
+        # Save to database
+        success = db.save_credentials(
+            merchant_id=merchant_id,
+            hash_key=hash_key, 
+            hash_iv=hash_iv,
+            environment=environment,
+            sender_info={
+                "name": sender_name,
+                "phone": sender_phone,
+                "address": sender_address
+            }
+        )
+        
+        if success:
+            # Update global variables
+            set_ecpay_credentials(merchant_id, hash_key, hash_iv, environment)
+            st.success("設定已儲存！")
+            st.rerun()
+        else:
+            st.error("儲存設定時發生錯誤")
+    
+    # Separate test connection functionality
+    if ecpay_db:
+        st.divider()
+        col1, col2 = st.columns([3, 1])
+        with col2:
+            test_conn = st.button("測試連線", use_container_width=True, key="test_ecpay_conn")
+        
+        if test_conn:
             try:
                 # Prepare test order data
                 test_order = {
@@ -138,8 +150,8 @@ def settings_ui(db):
                     "LogisticsSubType": "UNIMARTC2C",  # 7-ELEVEN C2C
                     "GoodsAmount": 100,
                     "GoodsName": "測試商品",
-                    "SenderName": sender_name or "測試寄件人",
-                    "SenderCellPhone": sender_phone or "0912345678",
+                    "SenderName": ecpay_db.get('sender_name') or "測試寄件人",
+                    "SenderCellPhone": ecpay_db.get('sender_phone') or "0912345678",
                     "ReceiverName": "測試收件人",
                     "ReceiverCellPhone": "0987654321",
                     "ReceiverStoreID": "131386",  # 測試門市
