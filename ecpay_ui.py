@@ -332,7 +332,7 @@ def shopify_ecpay_ui(order, db):
         "OKMARTC2C": "OK超商店到店"
     }
     
-    with st.expander("綠界物流設定"):
+    with st.container():
         # Get customer info
         customer_name = f"{order.get('customer', {}).get('first_name', '')} {order.get('customer', {}).get('last_name', '')}".strip()
         
