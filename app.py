@@ -1655,7 +1655,7 @@ def extract_logistics_info(order):
     }
     
     # Check order notes
-    note = order.get('note', '')
+    note = order.get('Additional details', '')
     if note:
         # Extract using regex patterns
         cvs_company_match = re.search(r'超商類型\(CvsCompany\)\s*[：:]\s*(.+?)(?:\n|$)', note)
