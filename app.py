@@ -1610,18 +1610,9 @@ def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None
         handle_shopify_editor_changes(editor_key, edited_df, filtered_df, db)
 
 def get_shopify_order_details(shop_url, access_token, order_num):
-    """Fetch detailed order information from Shopify
-    
-    Args:
-        shop_url (str): Shopify shop URL
-        access_token (str): Shopify access token
-        order_num (str): Order number (visible to customers)
-        
-    Returns:
-        dict: Order details or None on error
-    """
+    """Fetch detailed order information from Shopify with logistics details"""
     try:
-        # First, get a list of orders by name (order number)
+        # First, get the order by number
         clean_order_num = str(order_num).replace('#', '')
         url = f"https://{shop_url}/admin/api/2024-01/orders.json?name={clean_order_num}&status=any"
         headers = {'X-Shopify-Access-Token': access_token}
@@ -1631,30 +1622,81 @@ def get_shopify_order_details(shop_url, access_token, order_num):
         
         orders = response.json().get('orders', [])
         
-        # Look for a matching order
+        # Find the matching order
         for order in orders:
             order_name = str(order.get('name', '')).replace('#', '')
             if order_name == clean_order_num:
                 # Add shop domain to order data for callback URL
                 order['shopify_domain'] = shop_url
+                
+                # Get metafields (where CVS info might be stored)
+                metafields_url = f"https://{shop_url}/admin/api/2024-01/orders/{order['id']}/metafields.json"
+                metafields_response = requests.get(metafields_url, headers=headers)
+                if metafields_response.status_code == 200:
+                    metafields = metafields_response.json().get('metafields', [])
+                    order['metafields'] = metafields
+                
+                # Extract logistics info from order notes
+                order['logistics_info'] = extract_logistics_info(order)
                 return order
                 
-        # If no match found, try direct lookup if order_num looks like an ID
-        if str(order_num).isdigit() and len(str(order_num)) > 10:
-            direct_url = f"https://{shop_url}/admin/api/2024-01/orders/{order_num}.json"
-            direct_response = requests.get(direct_url, headers=headers)
-            if direct_response.status_code == 200:
-                order_data = direct_response.json().get('order')
-                if order_data:
-                    order_data['shopify_domain'] = shop_url
-                    return order_data
-                    
-        # If we got here, we couldn't find the order
         return None
             
     except Exception as e:
         st.error(f"Error fetching Shopify order details: {str(e)}")
         return None
+
+def extract_logistics_info(order):
+    """Extract logistics information from order notes or attributes"""
+    logistics_info = {
+        'cvs_company': None,
+        'cvs_store_id': None,
+        'logistics_subtype': None
+    }
+    
+    # Check order notes
+    note = order.get('note', '')
+    if note:
+        # Extract using regex patterns
+        cvs_company_match = re.search(r'超商類型\(CvsCompany\)\s*[：:]\s*(.+?)(?:\n|$)', note)
+        if cvs_company_match:
+            company = cvs_company_match.group(1).strip()
+            # Map to ECPay logistics subtype
+            if "7-ELEVEN" in company:
+                logistics_info['cvs_company'] = "7-ELEVEN"
+                logistics_info['logistics_subtype'] = "UNIMARTC2C"
+            elif "全家" in company:
+                logistics_info['cvs_company'] = "全家"
+                logistics_info['logistics_subtype'] = "FAMIC2C"
+            elif "萊爾富" in company:
+                logistics_info['cvs_company'] = "萊爾富"
+                logistics_info['logistics_subtype'] = "HILIFEC2C"
+            elif "OK" in company:
+                logistics_info['cvs_company'] = "OK"
+                logistics_info['logistics_subtype'] = "OKMARTC2C"
+        
+        # Extract store ID
+        store_id_match = re.search(r'門市代號\(CvsStoreId\)\s*[：:]\s*(\d+)', note)
+        if store_id_match:
+            logistics_info['cvs_store_id'] = store_id_match.group(1).strip()
+    
+    # Check note attributes as well (Shopify sometimes stores these separately)
+    note_attributes = order.get('note_attributes', [])
+    if note_attributes:
+        for attr in note_attributes:
+            if attr.get('name', '').lower() in ['cvscompany', 'cvs_company', 'convenience store']:
+                company = attr.get('value', '').strip()
+                if "7-ELEVEN" in company:
+                    logistics_info['cvs_company'] = "7-ELEVEN"
+                    logistics_info['logistics_subtype'] = "UNIMARTC2C"
+                elif "全家" in company:
+                    logistics_info['cvs_company'] = "全家"
+                    logistics_info['logistics_subtype'] = "FAMIC2C"
+            
+            if attr.get('name', '').lower() in ['cvsstoreid', 'cvs_store_id', 'store id']:
+                logistics_info['cvs_store_id'] = attr.get('value', '').strip()
+    
+    return logistics_info
 
 @st.fragment
 def shopify_orders_table(filtered_df, section_key=""):
