@@ -1655,7 +1655,7 @@ def extract_logistics_info(order):
     }
     
     # Check order notes
-    note = order.get('Additional details', '')
+    note = order.get('note', '')
     if note:
         # Extract using updated regex patterns that account for newline separation
         cvs_company_match = re.search(
