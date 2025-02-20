@@ -1661,10 +1661,10 @@ def extract_logistics_info(order):
         for attr in note_attributes:
             name = attr.get('name', '').lower()
             value = attr.get('value', '').strip()
-            # Check for CVS company; using substring check to match keys like "超商類型(CvsCompany)"
-            if 'cvscompany' in name:
+            # Check for CVS Company using either English or Chinese label
+            if 'cvscompany' in name or '超商類型' in name:
                 logistics_info['cvs_company'] = value
-                # Optionally map the company to a logistics subtype
+                # Map the company to a logistics subtype
                 if "7-eleven" in value.lower():
                     logistics_info['logistics_subtype'] = "UNIMARTC2C"
                 elif "全家" in value:
@@ -1673,14 +1673,14 @@ def extract_logistics_info(order):
                     logistics_info['logistics_subtype'] = "HILIFEC2C"
                 elif "ok" in value.lower():
                     logistics_info['logistics_subtype'] = "OKMARTC2C"
-            # Check for CVS store id; e.g. "門市代號(CvsStoreId)"
-            elif 'cvsstoreid' in name:
+            # Check for CVS Store ID using either the English key or the Chinese label
+            elif 'cvsstoreid' in name or '門市代號' in name:
                 logistics_info['cvs_store_id'] = value
-            # Also, directly grab logistics subtype if available, e.g. "物流子代碼(LogisticsSubType)"
+            # Also, directly grab logistics subtype if available
             elif 'logisticssubtype' in name:
                 logistics_info['logistics_subtype'] = value
 
-    # Fallback: if not found in note_attributes, try to parse the note field
+    # Fallback: if not found in note_attributes, try parsing the note field
     if not logistics_info['cvs_company'] or not logistics_info['cvs_store_id']:
         note = order.get('note', '')
         if note:
@@ -1703,6 +1703,7 @@ def extract_logistics_info(order):
                         logistics_info['cvs_store_id'] = lines[idx + 1]
     
     return logistics_info
+
 
 
 
