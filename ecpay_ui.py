@@ -34,7 +34,7 @@ def settings_ui(db):
     if merchant_id and hash_key and hash_iv:
         st.success("✅ ECPay 憑證已載入")
         st.info(f"商店代號: {merchant_id} (環境: {'測試' if environment == 'test' else '正式'})")
-        
+        #22
         # Set credentials globally
         set_ecpay_credentials(merchant_id, hash_key, hash_iv, environment)
     else:
