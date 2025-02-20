@@ -1657,8 +1657,11 @@ def extract_logistics_info(order):
     # Check order notes
     note = order.get('Additional details', '')
     if note:
-        # Extract using regex patterns
-        cvs_company_match = re.search(r'超商類型\(CvsCompany\)\s*[：:]\s*(.+?)(?:\n|$)', note)
+        # Extract using updated regex patterns that account for newline separation
+        cvs_company_match = re.search(
+            r'超商類型\(CvsCompany\)\s*(?:[:：]?\s*\n\s*)(.+?)(?:\n|$)',
+            note
+        )
         if cvs_company_match:
             company = cvs_company_match.group(1).strip()
             # Map to ECPay logistics subtype
@@ -1675,12 +1678,15 @@ def extract_logistics_info(order):
                 logistics_info['cvs_company'] = "OK"
                 logistics_info['logistics_subtype'] = "OKMARTC2C"
         
-        # Extract store ID
-        store_id_match = re.search(r'門市代號\(CvsStoreId\)\s*[：:]\s*(\d+)', note)
+        # Extract store ID with updated pattern
+        store_id_match = re.search(
+            r'門市代號\(CvsStoreId\)\s*(?:[:：]?\s*\n\s*)(\d+)',
+            note
+        )
         if store_id_match:
             logistics_info['cvs_store_id'] = store_id_match.group(1).strip()
     
-    # Check note attributes as well (Shopify sometimes stores these separately)
+    # Optionally check note attributes if available
     note_attributes = order.get('note_attributes', [])
     if note_attributes:
         for attr in note_attributes:
@@ -1697,6 +1703,7 @@ def extract_logistics_info(order):
                 logistics_info['cvs_store_id'] = attr.get('value', '').strip()
     
     return logistics_info
+
 
 @st.fragment
 def shopify_orders_table(filtered_df, section_key=""):
