@@ -1656,6 +1656,8 @@ def extract_logistics_info(order):
     
     # Attempt to get the additional details.
     # Sometimes this might be in order.get('note') or another key—double-check your JSON keys.
+    st.write("Full order response:")
+    st.write(json.dumps(order, indent=2))
     note = order.get('note', '')
     print("Additional details:", note)
     if note:
