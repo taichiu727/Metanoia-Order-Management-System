@@ -1534,7 +1534,7 @@ def fetch_and_process_shopify_orders(credentials, db):
         return df
 
 
-@st.fragment
+
 def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None):
     """Enhanced Shopify order editing function with improved logistics info display"""
     all_received = all(order_data['Received'])
