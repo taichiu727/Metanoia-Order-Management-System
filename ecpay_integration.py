@@ -41,27 +41,45 @@ class ECPayLogistics:
     
     @staticmethod
     def create_check_mac_value(params):
-        """Generate CheckMacValue for ECPay API"""
+        """Generate CheckMacValue for ECPay API following their exact process"""
         if not ECPAY_HASH_KEY or not ECPAY_HASH_IV:
             raise ValueError("ECPay credentials not set. Call set_ecpay_credentials() first.")
         
-        # Step 1: Sort parameters alphabetically and exclude CheckMacValue
+        # Step 1: Sort parameters alphabetically
+        # Note: Exclude CheckMacValue if it exists
         sorted_params = {}
         for key in sorted(params.keys()):
             if key != "CheckMacValue":
                 sorted_params[key] = params[key]
         
-        # Step 2: Create URL encoded string
-        encoding_str = "HashKey=" + ECPAY_HASH_KEY
+        # Step 2: Create a string with HashKey at beginning and HashIV at end
+        # Format: HashKey=key&param1=value1&param2=value2&...&paramN=valueN&HashIV=iv
+        stringified = "HashKey=" + ECPAY_HASH_KEY
         for key, value in sorted_params.items():
-            encoding_str += "&" + key + "=" + str(value)
-        encoding_str += "&HashIV=" + ECPAY_HASH_IV
+            stringified += "&" + key + "=" + str(value)
+        stringified += "&HashIV=" + ECPAY_HASH_IV
         
-        # Step 3: URL encode the string
-        encoding_str = quote(encoding_str, safe="").lower()
+        # Step 3: URL encode the entire string
+        # ECPay requires specific URL encoding where spaces are encoded as '+'
+        from urllib.parse import quote_plus
+        encoded = quote_plus(stringified)
         
-        # Step 4: MD5 hash and convert to uppercase
-        check_mac_value = hashlib.md5(encoding_str.encode("utf-8")).hexdigest().upper()
+        # Step 4: Convert to lowercase
+        encoded = encoded.lower()
+        
+        # Step 5: Apply MD5 hash
+        import hashlib
+        hashed = hashlib.md5(encoded.encode('utf-8')).hexdigest()
+        
+        # Step 6: Convert to uppercase
+        check_mac_value = hashed.upper()
+        
+        # Debug output
+        print(f"Original params: {params}")
+        print(f"Sorted params: {sorted_params}")
+        print(f"Pre-encoded string: {stringified}")
+        print(f"URL-encoded string: {encoded}")
+        print(f"Generated CheckMacValue: {check_mac_value}")
         
         return check_mac_value
     
