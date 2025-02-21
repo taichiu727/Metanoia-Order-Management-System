@@ -102,7 +102,7 @@ def truncate_goods_name(goods_name):
     return cleaned_name
 
 def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
-    """Render ECPay logistics button with exact merchant trade number
+    """Render ECPay logistics button with merchant trade number debugging
     
     Args:
         order_id (str): Order ID
@@ -141,8 +141,13 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                 # Truncate goods name to 25 characters
                 goods_name = truncate_goods_name(logistics_data.get('goods_name', '商品'))
                 
-                # Use Shopify order number directly as MerchantTradeNo - EXACTLY as #1213
+                # Use Shopify order number EXACTLY as #1213
                 merchant_trade_no = f"#{order_id}"
+                
+                # Detailed logging of merchant trade number
+                st.write(f"Debug: Merchant Trade Number: {merchant_trade_no}")
+                st.write(f"Debug: Order ID: {order_id}")
+                st.write(f"Debug: Platform: {platform}")
                 
                 order_request = {
                     "MerchantTradeNo": merchant_trade_no,
@@ -161,9 +166,18 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                     "IsCollection": logistics_data.get('is_collection', 'N')
                 }
                 
+                # Additional logging of request details
+                st.write("Debug: Full Order Request:")
+                for key, value in order_request.items():
+                    st.write(f"{key}: {value}")
+                
                 # Create logistics order
                 with st.spinner("建立物流單中..."):
                     response = ECPayLogistics.create_logistics_order(order_request)
+                    
+                    # Log full response
+                    st.write("Debug: API Response:")
+                    st.json(response)
                     
                     if "RtnCode" in response and response["RtnCode"] == "1":
                         # Success - save to database if possible
