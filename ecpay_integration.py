@@ -266,7 +266,61 @@ class ECPayDatabase:
         except Exception as e:
             print(f"Database error: {str(e)}")
             return False
-    
+    def save_sender_info(self, sender_info):
+        """Save only the sender information
+        
+        Args:
+            sender_info (dict): Sender information with name, phone, and address
+            
+        Returns:
+            bool: Success status
+        """
+        try:
+            cursor = self.conn.cursor()
+            
+            # Check if there's an existing record
+            cursor.execute("SELECT id FROM ecpay_credentials LIMIT 1")
+            record = cursor.fetchone()
+            
+            if record:
+                # Update existing record
+                cursor.execute("""
+                    UPDATE ecpay_credentials 
+                    SET 
+                        sender_name = %s,
+                        sender_phone = %s,
+                        sender_address = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                    RETURNING id
+                """, (
+                    sender_info.get("name"),
+                    sender_info.get("phone"),
+                    sender_info.get("address"),
+                    record[0]
+                ))
+            else:
+                # Insert new record with default values for credentials
+                cursor.execute("""
+                    INSERT INTO ecpay_credentials 
+                    (merchant_id, hash_key, hash_iv, environment, sender_name, sender_phone, sender_address)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                """, (
+                    'placeholder',  # Using placeholder since real values will come from secrets
+                    'placeholder',
+                    'placeholder',
+                    'test',
+                    sender_info.get("name"),
+                    sender_info.get("phone"),
+                    sender_info.get("address")
+                ))
+                
+            self.conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error saving sender info: {str(e)}")
+            return False
     def save_credentials(self, merchant_id, hash_key, hash_iv, environment="test", sender_info=None):
         """Save ECPay credentials
         

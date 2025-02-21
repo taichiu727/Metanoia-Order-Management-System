@@ -220,19 +220,38 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
         # Order doesn't have ECPay logistics yet, show create button
         if st.button("建立綠界物流單", key=f"create_ecpay_{order_id}"):
             try:
-                # Load ECPay credentials
+                # Try to load credentials from database first
                 ecpay_creds = db.get_credentials()
-                if not ecpay_creds:
-                    st.error("請先設定綠界科技帳號")
-                    return
                 
-                # Set credentials
-                set_ecpay_credentials(
-                    ecpay_creds['merchant_id'],
-                    ecpay_creds['hash_key'],
-                    ecpay_creds['hash_iv'],
-                    ecpay_creds['environment']
-                )
+                # If not in database, use Streamlit secrets
+                if not ecpay_creds or not ecpay_creds.get('merchant_id'):
+                    merchant_id = st.secrets.get("ECPAY_MERCHANT_ID")
+                    hash_key = st.secrets.get("ECPAY_HASH_KEY") 
+                    hash_iv = st.secrets.get("ECPAY_HASH_IV")
+                    
+                    if not (merchant_id and hash_key and hash_iv):
+                        st.error("未找到 ECPay 憑證，請在 Streamlit Secrets 或資料庫中設定")
+                        return
+                        
+                    # Get sender info from database
+                    sender_info = {}
+                    if ecpay_creds:
+                        sender_info = {
+                            'sender_name': ecpay_creds.get('sender_name', ''),
+                            'sender_phone': ecpay_creds.get('sender_phone', ''),
+                            'sender_address': ecpay_creds.get('sender_address', '')
+                        }
+                    
+                    # Use the secrets and sender info
+                    set_ecpay_credentials(merchant_id, hash_key, hash_iv, "test")
+                else:
+                    # Use database credentials
+                    set_ecpay_credentials(
+                        ecpay_creds['merchant_id'],
+                        ecpay_creds['hash_key'],
+                        ecpay_creds['hash_iv'],
+                        ecpay_creds['environment']
+                    )
                 
                 # Format current time for ECPay
                 current_time = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
