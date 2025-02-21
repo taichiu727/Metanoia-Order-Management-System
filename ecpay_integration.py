@@ -88,13 +88,8 @@ class ECPayLogistics:
     @staticmethod
     def create_logistics_order(order_data):
         """Create a new logistics order with ECPay"""
-        # Ensure unique MerchantTradeNo by appending timestamp
-        merchant_trade_no = order_data.get("MerchantTradeNo", "")
-        if merchant_trade_no:
-            # Make sure it's no longer than 20 chars (ECPay limit)
-            merchant_trade_no = f"{merchant_trade_no}_{int(time.time() % 10000)}"
-            if len(merchant_trade_no) > 20:
-                merchant_trade_no = merchant_trade_no[-20:]
+        # Generate a default order number if not provided
+        merchant_trade_no = order_data.get("MerchantTradeNo", "ORDER")
         
         # Sanitize receiver name (max 5 Chinese chars or 10 English chars)
         receiver_name = order_data.get("ReceiverName", "")
@@ -132,11 +127,6 @@ class ECPayLogistics:
         if order_data.get("ReceiverEmail"):
             params["ReceiverEmail"] = order_data.get("ReceiverEmail", "")
         
-        # Debug log - print request parameters
-        print("ECPay Request Parameters:")
-        for key, value in params.items():
-            print(f"{key}: {value}")
-        
         # Generate CheckMacValue
         params["CheckMacValue"] = ECPayLogistics.create_check_mac_value(params)
         
@@ -152,12 +142,6 @@ class ECPayLogistics:
             status_code = response.status_code
             content_type = response.headers.get("content-type", "")
             content = response.text
-            
-            print(f"ECPay Response Status: {status_code}")
-            print(f"ECPay Response Content-Type: {content_type}")
-            print(f"ECPay Response Content: {content}")
-            
-            # Rest of the method remains the same...
             
             if status_code != 200:
                 return {
