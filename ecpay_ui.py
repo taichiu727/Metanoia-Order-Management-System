@@ -62,7 +62,7 @@ def settings_ui(db):
 
 
 def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
-    """Render ECPay logistics button with flexible printing
+    """Render ECPay logistics button with comprehensive error handling
     
     Args:
         order_id (str): Order ID
@@ -103,9 +103,12 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                 if goods_name and len(goods_name) > 45:
                     goods_name = goods_name[:45] + "..."
                 
+                # Generate a unique and compliant MerchantTradeNo
+                merchant_trade_no = f"SH{order_id}_{int(time.time() % 10000)}"
+                
                 # Prepare order data for ECPay
                 order_request = {
-                    "MerchantTradeNo": f"{platform[:2].upper()}{order_id}_{int(time.time() % 10000)}",
+                    "MerchantTradeNo": merchant_trade_no,
                     "MerchantTradeDate": current_time,
                     "LogisticsType": "CVS",
                     "LogisticsSubType": logistics_data.get('logistics_subtype', 'UNIMARTC2C'),
@@ -131,7 +134,7 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                             "order_id": order_id,
                             "platform": platform,
                             "ecpay_logistics_id": response.get("AllPayLogisticsID", ""),
-                            "merchant_trade_no": order_request.get("MerchantTradeNo", ""),
+                            "merchant_trade_no": merchant_trade_no,
                             "logistics_type": "CVS",
                             "logistics_sub_type": order_request.get('LogisticsSubType', 'UNIMARTC2C'),
                             "store_id": order_request.get('ReceiverStoreID', ''),
@@ -168,28 +171,70 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                 st.write(f"Platform: {platform}")
                 st.write("Logistics Data:", logistics_data)
                 
-                # Prepare print parameters using logistics data
+                # Prepare manual printing parameters
                 store_id = logistics_data.get('store_id', '')
-                merchant_trade_no = f"{platform[:2].upper()}{order_id}"
                 
-                # Attempt to query existing logistics information
-                query_response = ECPayLogistics.query_logistics_order(MerchantTradeNo=merchant_trade_no)
+                # Determine document type based on store ID
+                document_type = "UNIMARTC2C"  # Default to 7-ELEVEN
+                if store_id and store_id.startswith('1'):  # Assuming Family Mart stores start with 1
+                    document_type = "FAMIC2C"
                 
-                # Extract printing parameters from query response
-                if not query_response.get('error'):
-                    # Use query response details for printing
-                    AllPayLogisticsID = query_response.get('AllPayLogisticsID')
-                    CVSPaymentNo = query_response.get('CVSPaymentNo')
-                    CVSValidationNo = query_response.get('CVSValidationNo', '')
+                # Create a new logistics order for printing
+                # Use Streamlit secrets for credentials
+                merchant_id = st.secrets.get("ECPAY_MERCHANT_ID")
+                hash_key = st.secrets.get("ECPAY_HASH_KEY") 
+                hash_iv = st.secrets.get("ECPAY_HASH_IV")
+                
+                if not (merchant_id and hash_key and hash_iv):
+                    st.error("未找到 ECPay 憑證，請在 Streamlit Secrets 中設定")
+                    return
                     
-                    document_type = "UNIMARTC2C"  # Default to 7-ELEVEN
-                    if store_id and store_id.startswith('1'):  # Assuming Family Mart stores start with 1
-                        document_type = "FAMIC2C"
+                # Set credentials for production environment
+                set_ecpay_credentials(merchant_id, hash_key, hash_iv, "production")
                 
+                # Format current time for ECPay
+                current_time = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
+                
+                # Clean up receiver name if needed
+                receiver_name = customer_data.get('name', '')
+                if receiver_name and len(receiver_name) > 10:  # Limit to max 10 chars
+                    receiver_name = receiver_name[:10]
+                
+                # Generate a unique trade number for this print attempt
+                merchant_trade_no = f"PRT{order_id}_{int(time.time() % 10000)}"
+                
+                # Prepare order data for ECPay
+                order_request = {
+                    "MerchantTradeNo": merchant_trade_no,
+                    "MerchantTradeDate": current_time,
+                    "LogisticsType": "CVS",
+                    "LogisticsSubType": logistics_data.get('logistics_subtype', 'UNIMARTC2C'),
+                    "GoodsAmount": logistics_data.get('amount', 0),
+                    "GoodsName": "列印託運單",
+                    "SenderName": "邱泰滕",
+                    "SenderCellPhone": "0988528467",
+                    "ReceiverName": receiver_name,
+                    "ReceiverCellPhone": customer_data.get('phone', ''),
+                    "ReceiverEmail": customer_data.get('email', ''),
+                    "ReceiverStoreID": store_id,
+                    "ServerReplyURL": logistics_data.get('callback_url', ""),
+                    "IsCollection": "N"
+                }
+                
+                # Create a new logistics order
+                create_response = ECPayLogistics.create_logistics_order(order_request)
+                
+                # Check if order creation was successful
+                if "RtnCode" in create_response and create_response["RtnCode"] == "1":
+                    # Extract printing parameters
+                    AllPayLogisticsID = create_response.get('AllPayLogisticsID')
+                    CVSPaymentNo = create_response.get('CVSPaymentNo')
+                    CVSValidationNo = create_response.get('CVSValidationNo', '')
+                    
                     # Validate required parameters
                     if not AllPayLogisticsID or not CVSPaymentNo:
                         st.error("無法取得物流單資訊")
-                        st.write("Query Response:", query_response)
+                        st.write("Create Response:", create_response)
                         return
                     
                     # Print shipping document
@@ -204,8 +249,11 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                     st.components.v1.html(form_html, height=500, scrolling=True)
                     st.success("正在開啟物流單列印視窗，請等待...")
                 else:
-                    st.error("無法查詢物流單資訊")
-                    st.write("Query Error:", query_response)
+                    # Error in creating logistics order
+                    error_msg = create_response.get("RtnMsg", "未知錯誤")
+                    error_code = create_response.get("RtnCode", "")
+                    st.error(f"建立物流單失敗: {error_msg} (錯誤代碼: {error_code})")
+                    st.write("Create Response:", create_response)
             
             except Exception as e:
                 st.error(f"列印託運單時發生錯誤: {str(e)}")
