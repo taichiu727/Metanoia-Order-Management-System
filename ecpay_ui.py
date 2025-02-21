@@ -78,34 +78,22 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
         # Order already has ECPay logistics, show status and options
         st.success(f"已建立綠界物流單 (ID: {existing_order['ecpay_logistics_id']})")
         
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("列印託運單", key=f"print_{order_id}"):
-                logistics_id = existing_order['ecpay_logistics_id']
-                payment_no = existing_order['cvs_payment_no']
-                validation_no = existing_order.get('cvs_validation_no')
-                logistics_subtype = existing_order['logistics_sub_type']
-                
-                document_type = "UNIMARTC2C" if "UNIMART" in logistics_subtype else "FAMIC2C"
-                
-                form_html = ECPayLogistics.print_shipping_document(
-                    logistics_id=logistics_id,
-                    payment_no=payment_no,
-                    validation_no=validation_no,
-                    document_type=document_type
-                )
-                
-                # Display the form for auto-submission with height=500 to ensure it's visible
-                st.components.v1.html(form_html, height=500, scrolling=True)
-                st.success("正在開啟列印視窗，請等待...")
-                
-        with col2:
-            if st.button("查詢物流狀態", key=f"status_{order_id}"):
-                st.info(f"物流狀態: {existing_order.get('status_msg', '未知')}")
-                if existing_order.get('tracking_number'):
-                    st.info(f"追蹤號碼: {existing_order['tracking_number']}")
+        # Print shipping document button with fixed implementation
+        if st.button("列印託運單", key=f"print_{order_id}"):
+            # Directly pass the entire existing order to the print function
+            try:
+                print_shipping_document(existing_order)
+            except Exception as e:
+                st.error(f"列印失敗: {str(e)}")
+        
+        # Status query button
+        if st.button("查詢物流狀態", key=f"status_{order_id}"):
+            st.info(f"物流狀態: {existing_order.get('status_msg', '未知')}")
+            if existing_order.get('tracking_number'):
+                st.info(f"追蹤號碼: {existing_order['tracking_number']}")
+    
     else:
-        # Order doesn't have ECPay logistics yet, show create button
+        # Original create logistics order code remains the same
         if st.button("建立綠界物流單", key=f"create_ecpay_{order_id}"):
             try:
                 # Use Streamlit secrets for credentials
@@ -519,6 +507,7 @@ def shopee_ecpay_ui(order, db):
             logistics_data=logistics_data,
             db=db
         )
+
 
 
 def init_ecpay_session():

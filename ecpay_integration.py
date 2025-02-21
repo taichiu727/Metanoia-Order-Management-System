@@ -210,67 +210,56 @@ class ECPayLogistics:
             }
     
     @staticmethod
-    def print_shipping_document(logistics_id, payment_no, validation_no=None, document_type="UNIMARTC2C"):
-        """Generate shipping document for printing in a new tab
+    def print_shipping_document(existing_order):
+        """
+        Print shipping document for an existing logistics order
         
         Args:
-            logistics_id (str): ECPay logistics transaction ID
-            payment_no (str): Shipping number
-            validation_no (str, optional): Validation code (required for 7-ELEVEN)
-            document_type (str): "UNIMARTC2C" for 7-ELEVEN or "FAMIC2C" for FamilyMart
-                
-        Returns:
-            str: HTML content for printing shipping label
+            existing_order (dict): Existing logistics order information
         """
-        # Prepare parameters
-        params = {
-            "MerchantID": ECPAY_MERCHANT_ID,
-            "AllPayLogisticsID": logistics_id,
-            "CVSPaymentNo": payment_no
-        }
-        
-        # Add validation code for 7-ELEVEN
-        if document_type == "UNIMARTC2C" and validation_no:
-            params["CVSValidationNo"] = validation_no
-        
-        # Generate CheckMacValue
-        params["CheckMacValue"] = ECPayLogistics.create_check_mac_value(params)
-        
-        # Determine the correct API endpoint
-        if document_type == "UNIMARTC2C":
-            url = ECPAY_CONFIG[ECPAY_ENV]["print_unimart_c2c"]
-        elif document_type == "FAMIC2C":
-            url = ECPAY_CONFIG[ECPAY_ENV]["print_fami_c2c"]
-        else:
-            return {"error": True, "message": "Unsupported document type"}
-        
-        # Create HTML with auto-submitting form in a new tab
-        form_html = f"""
-        <html>
-        <head>
-            <title>ECPay Shipping Label</title>
-        </head>
-        <body onload="document.getElementById('ecpayForm').submit();">
-            <form id="ecpayForm" method="post" action="{url}" target="_blank">
-        """
-        
-        for key, value in params.items():
-            form_html += f'<input type="hidden" name="{key}" value="{value}">\n'
-        
-        form_html += """
-            </form>
-            <script>
-                // This ensures the form submits immediately and opens in a new tab
-                setTimeout(function() {
-                    document.getElementById('ecpayForm').submit();
-                }, 100);
-            </script>
-            <p>正在開啟列印視窗，請等待...</p>
-        </body>
-        </html>
-        """
-        
-        return form_html
+        try:
+            # Ensure we have all required information
+            if not existing_order:
+                st.error("無法找到物流訂單資訊")
+                return
+            
+            # Extract necessary parameters
+            logistics_id = existing_order.get('ecpay_logistics_id')
+            payment_no = existing_order.get('cvs_payment_no')
+            validation_no = existing_order.get('cvs_validation_no')
+            logistics_subtype = existing_order.get('logistics_sub_type', '')
+            
+            # Validate required parameters
+            if not logistics_id or not payment_no:
+                st.error("缺少必要的物流資訊")
+                return
+            
+            # Determine document type based on logistics subtype
+            if "UNIMART" in logistics_subtype:
+                document_type = "UNIMARTC2C"
+            elif "FAMI" in logistics_subtype:
+                document_type = "FAMIC2C"
+            else:
+                document_type = "UNIMARTC2C"  # Default to 7-ELEVEN
+            
+            # Call ECPay method to print shipping document
+            form_html = ECPayLogistics.print_shipping_document(
+                logistics_id=logistics_id,
+                payment_no=payment_no,
+                validation_no=validation_no,
+                document_type=document_type
+            )
+            
+            # Display the form for auto-submission with full visibility
+            st.components.v1.html(form_html, height=500, scrolling=True)
+            
+            # Additional feedback
+            st.success(f"正在開啟 {document_type} 物流單列印視窗，請等待...")
+            
+        except Exception as e:
+            st.error(f"列印託運單時發生錯誤: {str(e)}")
+            import traceback
+            st.error(traceback.format_exc())
     
     @staticmethod
     def parse_ecpay_response(response_text):
