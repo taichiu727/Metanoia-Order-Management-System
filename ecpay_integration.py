@@ -44,18 +44,21 @@ class ECPayLogistics:
         """Generate CheckMacValue for ECPay API"""
         if not ECPAY_HASH_KEY or not ECPAY_HASH_IV:
             raise ValueError("ECPay credentials not set. Call set_ecpay_credentials() first.")
-            
-        # Step 1: Sort parameters alphabetically
-        sorted_params = sorted(params.items())
+        
+        # Step 1: Sort parameters alphabetically and exclude CheckMacValue
+        sorted_params = {}
+        for key in sorted(params.keys()):
+            if key != "CheckMacValue":
+                sorted_params[key] = params[key]
         
         # Step 2: Create URL encoded string
         encoding_str = "HashKey=" + ECPAY_HASH_KEY
-        for key, value in sorted_params:
+        for key, value in sorted_params.items():
             encoding_str += "&" + key + "=" + str(value)
         encoding_str += "&HashIV=" + ECPAY_HASH_IV
         
         # Step 3: URL encode the string
-        encoding_str = quote(encoding_str, safe="/").lower()
+        encoding_str = quote(encoding_str, safe="").lower()
         
         # Step 4: MD5 hash and convert to uppercase
         check_mac_value = hashlib.md5(encoding_str.encode("utf-8")).hexdigest().upper()
@@ -64,35 +67,30 @@ class ECPayLogistics:
     
     @staticmethod
     def create_logistics_order(order_data):
-        """Create a new logistics order with ECPay
-        
-        Args:
-            order_data (dict): Order information including needed fields
-                    
-        Returns:
-            dict: Response from ECPay API
-        """
+        """Create a new logistics order with ECPay"""
         # Ensure unique MerchantTradeNo by appending timestamp
         merchant_trade_no = order_data.get("MerchantTradeNo", "")
         if merchant_trade_no:
-            merchant_trade_no = f"{merchant_trade_no}_{int(time.time())}"[-20:]  # Limit to 20 chars
+            # Make sure it's no longer than 20 chars (ECPay limit)
+            merchant_trade_no = f"{merchant_trade_no}_{int(time.time() % 10000)}"
+            if len(merchant_trade_no) > 20:
+                merchant_trade_no = merchant_trade_no[-20:]
         
         # Sanitize receiver name (max 5 Chinese chars or 10 English chars)
         receiver_name = order_data.get("ReceiverName", "")
         if len(receiver_name) > 10:
-            # Keep only the first 5 Chinese chars or 10 English chars
             receiver_name = receiver_name[:10]
         
-        # Sanitize goods name (max 50 chars, no special symbols)
+        # VERY STRICT sanitizing of goods name - keep it extremely short
         goods_name = order_data.get("GoodsName", "")
-        if len(goods_name) > 45:
-            goods_name = goods_name[:45] + "..."
-        
-        # Strip emoji and special chars from goods name
+        # First remove emoji and special characters
         import re
         goods_name = re.sub(r'[^\w\s\u4e00-\u9fff,.]', '', goods_name)
+        # Then limit to no more than 25 characters (much shorter than the limit)
+        if len(goods_name) > 25:
+            goods_name = goods_name[:22] + "..."
         
-        # Prepare API parameters in proper x-www-form-urlencoded format
+        # Prepare API parameters with strict cleaning
         params = {
             "MerchantID": ECPAY_MERCHANT_ID,
             "MerchantTradeNo": merchant_trade_no,
@@ -105,20 +103,14 @@ class ECPayLogistics:
             "SenderCellPhone": order_data.get("SenderCellPhone", ""),
             "ReceiverName": receiver_name,
             "ReceiverCellPhone": order_data.get("ReceiverCellPhone", ""),
-            "ReceiverEmail": order_data.get("ReceiverEmail", ""),
             "ReceiverStoreID": order_data.get("ReceiverStoreID", ""),
             "ServerReplyURL": order_data.get("ServerReplyURL", ""),
             "IsCollection": order_data.get("IsCollection", "N")
         }
         
-        # Add optional fields if present
-        optional_fields = [
-            "SenderPhone", "ReceiverPhone", "TradeDesc", 
-            "Remark", "PlatformID", "ReturnStoreID"
-        ]
-        for field in optional_fields:
-            if field in order_data and order_data[field]:
-                params[field] = order_data[field]
+        # Only add fields that are actually needed and not empty
+        if order_data.get("ReceiverEmail"):
+            params["ReceiverEmail"] = order_data.get("ReceiverEmail", "")
         
         # Debug log - print request parameters
         print("ECPay Request Parameters:")
@@ -144,6 +136,8 @@ class ECPayLogistics:
             print(f"ECPay Response Status: {status_code}")
             print(f"ECPay Response Content-Type: {content_type}")
             print(f"ECPay Response Content: {content}")
+            
+            # Rest of the method remains the same...
             
             if status_code != 200:
                 return {

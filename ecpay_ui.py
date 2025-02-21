@@ -480,18 +480,14 @@ def shopee_ecpay_ui(order, db):
         for item in order.get("item_list", []):
             items.append(f"{item['item_name']} x {item['model_quantity_purchased']}")
         
-        items_desc = ", ".join(items[:3])
-        if len(items) > 3:
-            items_desc += f" 等{len(items)}項商品"
-            
-        # Trim to maximum allowed length
-        if len(items_desc) > 47:
-            items_desc = items_desc[:47] + "..."
+        items_desc = order.get('line_items', [])[0]['title'] if order.get('line_items') else '商品'
+        items_desc = items_desc[:20]  # Keep it very short
+        items_desc = re.sub(r'[^\w\s\u4e00-\u9fff,.]', '', items_desc)
             
         goods_name = st.text_input(
             "商品描述",
             value=items_desc,
-            max_chars=50,
+            max_chars=25,
             key=f"goods_{order_sn}"
         )
         
