@@ -213,7 +213,7 @@ class ECPayLogistics:
     @staticmethod
     def query_logistics_order(AllPayLogisticsID=None, MerchantTradeNo=None):
         """
-        Query logistics order information from ECPay
+        Query logistics order information from ECPay with enhanced flexibility
         
         Args:
             AllPayLogisticsID (str, optional): ECPay's logistics transaction ID
@@ -224,60 +224,87 @@ class ECPayLogistics:
         """
         # Validate input
         if not AllPayLogisticsID and not MerchantTradeNo:
-            raise ValueError("Either AllPayLogisticsID or MerchantTradeNo must be provided")
+            return {
+                "error": True,
+                "message": "必須提供 AllPayLogisticsID 或 MerchantTradeNo"
+            }
         
         # Determine environment URL
         url = ECPAY_CONFIG[ECPAY_ENV]["query_logistics"]
         
-        # Prepare parameters
-        params = {
-            "MerchantID": ECPAY_MERCHANT_ID,
-            "TimeStamp": int(time.time())  # Current Unix timestamp
-        }
+        # Prepare parameters with variations to improve query chances
+        variations = []
         
-        # Add either logistics ID or merchant trade number
-        if AllPayLogisticsID:
-            params["AllPayLogisticsID"] = AllPayLogisticsID
-        elif MerchantTradeNo:
-            params["MerchantTradeNo"] = MerchantTradeNo
+        # If MerchantTradeNo is provided, create variations
+        if MerchantTradeNo:
+            variations.extend([
+                MerchantTradeNo,
+                f"SH{MerchantTradeNo}",  # Shopify prefix
+                f"SP{MerchantTradeNo}",  # Shopee prefix
+                MerchantTradeNo.replace('SH', ''),
+                MerchantTradeNo.replace('SP', '')
+            ])
         
-        # Generate CheckMacValue
-        params["CheckMacValue"] = ECPayLogistics.create_check_mac_value(params)
+        # Deduplicate variations
+        variations = list(dict.fromkeys(variations))
         
-        try:
-            # Send request
-            response = requests.post(
-                url, 
-                data=params, 
-                headers={
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "Accept": "text/html"
-                }
-            )
-            
-            # Check response
-            if response.status_code != 200:
-                return {
-                    "error": True,
-                    "message": f"HTTP error: {response.status_code}",
-                    "details": response.text
-                }
-            
-            # Parse response
-            result = {}
-            lines = response.text.strip().split('&')
-            for line in lines:
-                if '=' in line:
-                    key, value = line.split('=', 1)
-                    result[key] = value
-            
-            return result
-        
-        except Exception as e:
-            return {
-                "error": True,
-                "message": str(e)
+        # Try each variation
+        for trade_no in variations:
+            # Prepare parameters
+            params = {
+                "MerchantID": ECPAY_MERCHANT_ID,
+                "TimeStamp": int(time.time())  # Current Unix timestamp
             }
+            
+            # Prefer AllPayLogisticsID if provided
+            if AllPayLogisticsID:
+                params["AllPayLogisticsID"] = AllPayLogisticsID
+            else:
+                params["MerchantTradeNo"] = trade_no
+            
+            # Generate CheckMacValue
+            params["CheckMacValue"] = ECPayLogistics.create_check_mac_value(params)
+            
+            try:
+                # Send request
+                response = requests.post(
+                    url, 
+                    data=params, 
+                    headers={
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "Accept": "text/html"
+                    }
+                )
+                
+                # Check response
+                if response.status_code == 200:
+                    # Parse response
+                    result = {}
+                    lines = response.text.strip().split('&')
+                    for line in lines:
+                        if '=' in line:
+                            key, value = line.split('=', 1)
+                            result[key] = value
+                    
+                    # Check if order was found
+                    if result and not result.get('RtnCode') == '0':
+                        return result
+                
+                # If this variation didn't work, continue to next
+                continue
+            
+            except Exception as e:
+                # Log the error but continue trying other variations
+                print(f"Query error for {trade_no}: {str(e)}")
+                continue
+        
+        # If no variations worked
+        return {
+            "error": True,
+            "message": "找不到對應的物流訂單",
+            "details": f"嘗試查詢的編號: {variations}"
+        }
+
     @staticmethod
     def print_shipping_document(logistics_id, payment_no, validation_no=None, document_type="UNIMARTC2C"):
         """Generate shipping document for printing in a new tab
