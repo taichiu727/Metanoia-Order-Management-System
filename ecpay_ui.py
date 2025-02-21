@@ -144,36 +144,15 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                 
                 # Create logistics order
                 with st.spinner("建立物流單中..."):
-                    try:
-                        # Log request data for debugging
-                        st.write("送出請求資料:")
-                        st.json(order_request)
-                        
-                        response = ECPayLogistics.create_logistics_order(order_request)
-                        
-                        # Log full response
-                        st.write("API 回應:")
-                        st.json(response)
-                        
-                        if "RtnCode" in response and response["RtnCode"] == "1":
-                            # Success code...
-                        else:
-                            # Show detailed error
-                            error_msg = response.get("RtnMsg", "未知錯誤")
-                            error_code = response.get("RtnCode", "")
-                            st.error(f"建立物流單失敗: {error_msg} (錯誤代碼: {error_code})")
-                            
-                            # Display troubleshooting information
-                            st.error("可能的問題:")
-                            st.error("1. 超商門市代號錯誤")
-                            st.error("2. 商品金額超出允許範圍")
-                            st.error("3. 收件人資訊不完整")
-                            st.error("4. 寄件人資訊格式不正確")
-                    except Exception as e:
-                        st.error(f"建立物流單時發生錯誤: {str(e)}")
-                        import traceback
-                        st.code(traceback.format_exc(), language="python")
+                    
+                    st.write("送出請求資料:")
+                    st.json(order_request)
+                    
                     response = ECPayLogistics.create_logistics_order(order_request)
+                    
+                    # Log full response
+                    st.write("API 回應:")
+                    st.json(response)
                     
                     if "RtnCode" in response and response["RtnCode"] == "1":
                         # Success - store the logistics order information
@@ -221,8 +200,16 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                      
                     else:
                         # Error
-                        st.error(f"建立物流單失敗: {response.get('RtnMsg', '未知錯誤')}")
-                        st.json(response)
+                        error_msg = response.get("RtnMsg", "未知錯誤")
+                        error_code = response.get("RtnCode", "")
+                        st.error(f"建立物流單失敗: {error_msg} (錯誤代碼: {error_code})")
+                        
+                        # Display troubleshooting information
+                        st.error("可能的問題:")
+                        st.error("1. 超商門市代號錯誤")
+                        st.error("2. 商品金額超出允許範圍")
+                        st.error("3. 收件人資訊不完整")
+                        st.error("4. 寄件人資訊格式不正確")
             except Exception as e:
                 st.error(f"建立物流單時發生錯誤: {str(e)}")
 
