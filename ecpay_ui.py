@@ -81,8 +81,28 @@ def truncate_goods_name(goods_name):
     
     return cleaned_name
 
+def truncate_goods_name(goods_name):
+    """
+    Truncate goods name to maximum 25 characters
+    
+    Args:
+        goods_name (str): Original goods name
+    
+    Returns:
+        str: Truncated goods name
+    """
+    # Remove any special characters
+    import re
+    cleaned_name = re.sub(r'[^\w\s\u4e00-\u9fff,.]', '', goods_name)
+    
+    # Truncate to 25 characters
+    if len(cleaned_name) > 25:
+        return cleaned_name[:22] + "..."
+    
+    return cleaned_name
+
 def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
-    """Render ECPay logistics button with 25-character goods name limit
+    """Render ECPay logistics button with exact merchant trade number
     
     Args:
         order_id (str): Order ID
@@ -121,7 +141,7 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                 # Truncate goods name to 25 characters
                 goods_name = truncate_goods_name(logistics_data.get('goods_name', '商品'))
                 
-                # Use Shopify order number directly as MerchantTradeNo
+                # Use Shopify order number directly as MerchantTradeNo - EXACTLY as #1213
                 merchant_trade_no = f"#{order_id}"
                 
                 order_request = {
