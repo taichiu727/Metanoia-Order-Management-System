@@ -64,76 +64,85 @@ class ECPayLogistics:
     
     @staticmethod
     def create_logistics_order(order_data):
-        """Create a new logistics order with ECPay
-        
-        Args:
-            order_data (dict): Order information including:
-                - MerchantTradeNo: Your order number
-                - MerchantTradeDate: Order date (format: yyyy/MM/dd HH:mm:ss)
-                - LogisticsType: 'CVS' for convenience store
-                - LogisticsSubType: Logistics subtype (e.g., 'UNIMARTC2C')
-                - GoodsAmount: Total price in integer
-                - GoodsName: Product description
-                - SenderName: Sender's name
-                - SenderCellPhone: Sender's mobile number
-                - ReceiverName: Receiver's name
-                - ReceiverCellPhone: Receiver's mobile
-                - ReceiverEmail: Receiver's email
-                - ReceiverStoreID: Store ID for pickup
-                - ServerReplyURL: Webhook URL for logistics status updates
-                
-        Returns:
-            dict: Response from ECPay API
-        """
+        """Create a new logistics order with ECPay"""
         # Prepare API parameters
         params = {
             "MerchantID": ECPAY_MERCHANT_ID,
-            # Required fields for all logistics orders
-            "MerchantTradeNo": order_data.get("MerchantTradeNo", ""),
+            # Add all required fields, ensuring proper formatting
+            "MerchantTradeNo": order_data.get("MerchantTradeNo", "") + str(int(time.time()))[-5:],  # Add timestamp suffix to ensure uniqueness
             "MerchantTradeDate": order_data.get("MerchantTradeDate", ""),
             "LogisticsType": order_data.get("LogisticsType", "CVS"),
             "LogisticsSubType": order_data.get("LogisticsSubType", ""),
             "GoodsAmount": order_data.get("GoodsAmount", 0),
             "GoodsName": order_data.get("GoodsName", ""),
             "SenderName": order_data.get("SenderName", ""),
+            "SenderCellPhone": order_data.get("SenderCellPhone", ""),
             "ReceiverName": order_data.get("ReceiverName", ""),
             "ReceiverCellPhone": order_data.get("ReceiverCellPhone", ""),
-            "ServerReplyURL": order_data.get("ServerReplyURL", ""),
+            "ReceiverEmail": order_data.get("ReceiverEmail", ""),
             "ReceiverStoreID": order_data.get("ReceiverStoreID", ""),
+            "ServerReplyURL": order_data.get("ServerReplyURL", ""),
+            "IsCollection": order_data.get("IsCollection", "N")
         }
         
-        # Add optional fields
-        optional_fields = [
-            "SenderPhone", "SenderCellPhone", "ReceiverPhone", 
-            "ReceiverEmail", "TradeDesc", "ClientReplyURL",
-            "Remark", "PlatformID", "IsCollection", "CollectionAmount",
-            "ReturnStoreID"
-        ]
-        
-        for field in optional_fields:
-            if field in order_data and order_data[field]:
-                params[field] = order_data[field]
+        # Print raw parameters for debugging
+        print("Request Parameters:")
+        for key, value in params.items():
+            print(f"{key}: {value}")
         
         # Generate CheckMacValue
         params["CheckMacValue"] = ECPayLogistics.create_check_mac_value(params)
         
         # Send request to ECPay
         url = ECPAY_CONFIG[ECPAY_ENV]["create_order"]
-        response = requests.post(url, data=params)
+        print(f"Sending request to: {url}")
         
-        if response.status_code != 200:
-            return {"error": True, "message": f"HTTP error: {response.status_code}", "details": response.text}
-        
-        # Parse response
         try:
-            result = {}
-            for line in response.text.split('&'):
-                if '=' in line:
-                    key, value = line.split('=', 1)
-                    result[key] = value
-            return result
+            response = requests.post(url, data=params)
+            
+            print(f"Status Code: {response.status_code}")
+            print(f"Response Content-Type: {response.headers.get('content-type', '')}")
+            print(f"Response Content: {response.text}")
+            
+            if response.status_code != 200:
+                return {
+                    "error": True, 
+                    "message": f"HTTP error: {response.status_code}", 
+                    "details": response.text
+                }
+            
+            # Parse response
+            try:
+                # First try to parse as JSON
+                if response.text.strip().startswith('{'):
+                    return response.json()
+                
+                # Otherwise parse the key=value format
+                result = {}
+                for line in response.text.split('&'):
+                    if '=' in line:
+                        key, value = line.split('=', 1)
+                        result[key] = value
+                
+                # If result is empty, return the raw response
+                if not result:
+                    return {
+                        "rawResponse": response.text,
+                        "status": response.status_code
+                    }
+                    
+                return result
+            except Exception as e:
+                return {
+                    "error": True, 
+                    "message": f"Failed to parse response: {str(e)}", 
+                    "details": response.text
+                }
         except Exception as e:
-            return {"error": True, "message": f"Failed to parse response: {str(e)}", "details": response.text}
+            return {
+                "error": True, 
+                "message": f"Request error: {str(e)}"
+            }
     
     @staticmethod
     def print_shipping_document(logistics_id, payment_no, validation_no=None, document_type="UNIMARTC2C"):
