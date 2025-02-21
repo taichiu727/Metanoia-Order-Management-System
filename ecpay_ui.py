@@ -95,9 +95,9 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                     document_type=document_type
                 )
                 
-                # Display the form for auto-submission
-                st.components.v1.html(form_html, height=0)
-                st.success("託運單開啟中，請稍候...")
+                # Display the form for auto-submission with height=500 to ensure it's visible
+                st.components.v1.html(form_html, height=500, scrolling=True)
+                st.success("正在開啟列印視窗，請等待...")
                 
         with col2:
             if st.button("查詢物流狀態", key=f"status_{order_id}"):

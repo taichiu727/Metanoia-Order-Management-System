@@ -211,17 +211,18 @@ class ECPayLogistics:
     
     @staticmethod
     def print_shipping_document(logistics_id, payment_no, validation_no=None, document_type="UNIMARTC2C"):
-        """Generate shipping document for printing
+        """Generate shipping document for printing in a new tab
         
         Args:
             logistics_id (str): ECPay logistics transaction ID
             payment_no (str): Shipping number
             validation_no (str, optional): Validation code (required for 7-ELEVEN)
             document_type (str): "UNIMARTC2C" for 7-ELEVEN or "FAMIC2C" for FamilyMart
-            
+                
         Returns:
-            str: HTML content for printing or error message
+            str: HTML content for printing shipping label
         """
+        # Prepare parameters
         params = {
             "MerchantID": ECPAY_MERCHANT_ID,
             "AllPayLogisticsID": logistics_id,
@@ -243,21 +244,28 @@ class ECPayLogistics:
         else:
             return {"error": True, "message": "Unsupported document type"}
         
-        # Create a form to submit via JavaScript
+        # Create HTML with auto-submitting form in a new tab
         form_html = f"""
         <html>
-        <body>
-        <form id="ecpayForm" method="post" action="{url}" target="_blank">
+        <head>
+            <title>ECPay Shipping Label</title>
+        </head>
+        <body onload="document.getElementById('ecpayForm').submit();">
+            <form id="ecpayForm" method="post" action="{url}" target="_blank">
         """
         
         for key, value in params.items():
             form_html += f'<input type="hidden" name="{key}" value="{value}">\n'
         
         form_html += """
-        </form>
-        <script>
-            document.getElementById('ecpayForm').submit();
-        </script>
+            </form>
+            <script>
+                // This ensures the form submits immediately and opens in a new tab
+                setTimeout(function() {
+                    document.getElementById('ecpayForm').submit();
+                }, 100);
+            </script>
+            <p>正在開啟列印視窗，請等待...</p>
         </body>
         </html>
         """
