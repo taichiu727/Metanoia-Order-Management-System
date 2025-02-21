@@ -62,7 +62,7 @@ def settings_ui(db):
 
 
 def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
-    """Render ECPay logistics button
+    """Render ECPay logistics button using Streamlit secrets
     
     Args:
         order_id (str): Order ID
@@ -117,24 +117,35 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                     st.error("未找到 ECPay 憑證，請在 Streamlit Secrets 中設定")
                     return
                     
-                # Set credentials
+                # Set credentials for production environment
                 set_ecpay_credentials(merchant_id, hash_key, hash_iv, "production")
                 
                 # Format current time for ECPay
                 current_time = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
                 
+                # Clean up receiver name if needed
+                receiver_name = customer_data.get('name', '')
+                if receiver_name and len(receiver_name) > 10:  # Limit to max 10 chars
+                    receiver_name = receiver_name[:10]
+                
+                # Simplify goods name 
+                goods_name = logistics_data.get('goods_name', '商品')
+                if goods_name and len(goods_name) > 45:
+                    goods_name = goods_name[:45] + "..."
+                
                 # Prepare order data for ECPay
                 order_request = {
-                    "MerchantTradeNo": f"{platform[:2].upper()}{order_id}",
+                    # Add unique timestamp suffix to MerchantTradeNo
+                    "MerchantTradeNo": f"{platform[:2].upper()}{order_id}_{int(time.time() % 10000)}",
                     "MerchantTradeDate": current_time,
                     "LogisticsType": "CVS",
                     "LogisticsSubType": logistics_data.get('logistics_subtype', 'UNIMARTC2C'),
                     "GoodsAmount": logistics_data.get('amount', 0),
-                    "GoodsName": logistics_data.get('goods_name', '商品'),
-                    # Use fixed sender information
+                    "GoodsName": goods_name,
+                    # Fixed sender info
                     "SenderName": "邱泰滕",
                     "SenderCellPhone": "0988528467",
-                    "ReceiverName": customer_data.get('name', ''),
+                    "ReceiverName": receiver_name,
                     "ReceiverCellPhone": customer_data.get('phone', ''),
                     "ReceiverEmail": customer_data.get('email', ''),
                     "ReceiverStoreID": logistics_data.get('store_id', ''),
@@ -144,13 +155,13 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                 
                 # Create logistics order
                 with st.spinner("建立物流單中..."):
-                    
+                    # Show request details for debugging
                     st.write("送出請求資料:")
                     st.json(order_request)
                     
                     response = ECPayLogistics.create_logistics_order(order_request)
                     
-                    # Log full response
+                    # Show complete response for debugging
                     st.write("API 回應:")
                     st.json(response)
                     
@@ -161,8 +172,8 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                             "platform": platform,
                             "ecpay_logistics_id": response.get("AllPayLogisticsID", ""),
                             "logistics_type": "CVS",
-                            "logistics_sub_type": logistics_data.get('logistics_subtype', 'UNIMARTC2C'),
-                            "store_id": logistics_data.get('store_id', ''),
+                            "logistics_sub_type": order_request.get('LogisticsSubType', 'UNIMARTC2C'),
+                            "store_id": order_request.get('ReceiverStoreID', ''),
                             "cvs_payment_no": response.get("CVSPaymentNo", ""),
                             "cvs_validation_no": response.get("CVSValidationNo", ""),
                             "status": response.get("RtnCode", ""),
@@ -184,7 +195,7 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                             logistics_id = response.get("AllPayLogisticsID", "")
                             payment_no = response.get("CVSPaymentNo", "")
                             validation_no = response.get("CVSValidationNo", "")
-                            doc_type = "UNIMARTC2C" if "UNIMART" in logistics_data.get('logistics_subtype', '') else "FAMIC2C"
+                            doc_type = "UNIMARTC2C" if "UNIMART" in order_request.get('LogisticsSubType', '') else "FAMIC2C"
                             
                             form_html = ECPayLogistics.print_shipping_document(
                                 logistics_id=logistics_id,
@@ -196,31 +207,82 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                             st.components.v1.html(form_html, height=0)
                             st.success("託運單開啟中，請稍候...")
                         
-                        # Rerun to refresh the UI3
-                     
+                        # Rerun to refresh the UI
+                        st.rerun()
                     else:
                         # Error
                         error_msg = response.get("RtnMsg", "未知錯誤")
                         error_code = response.get("RtnCode", "")
                         st.error(f"建立物流單失敗: {error_msg} (錯誤代碼: {error_code})")
                         
-                        # Display troubleshooting information
+                        # Show detailed troubleshooting information
                         st.error("可能的問題:")
-                        st.error("1. 超商門市代號錯誤")
-                        st.error("2. 商品金額超出允許範圍")
-                        st.error("3. 收件人資訊不完整")
-                        st.error("4. 寄件人資訊格式不正確")
+                        st.error("1. 超商門市代號錯誤或不存在 (檢查門市代號是否正確)")
+                        st.error("2. 商品金額超出允許範圍1-20000元")
+                        st.error("3. 收件人姓名或手機格式不正確 (姓名不可有數字，手機須為09開頭10碼)")
+                        st.error("4. 交易編號重複 (請等待一分鐘後重試)")
+                        
             except Exception as e:
                 st.error(f"建立物流單時發生錯誤: {str(e)}")
+                import traceback
+                st.code(traceback.format_exc(), language="python")
 
 @st.fragment
 def shopify_ecpay_ui(order, db):
-    """Simple ECPay logistics UI for Shopify orders
+    """ECPay logistics UI for Shopify orders
     
     Args:
         order (dict): Shopify order data
         db: Database connection
     """
+    # Extract information from note attributes
+    def get_store_info_from_attributes(order):
+        # Look for store info in note attributes
+        note_attributes = order.get('note_attributes', [])
+        store_info = {
+            'cvs_company': None,
+            'cvs_store_id': None,
+            'logistics_subtype': 'UNIMARTC2C'  # Default to 7-ELEVEN
+        }
+        
+        # Check order notes and attributes for store info
+        for attr in note_attributes:
+            name = str(attr.get('name', '')).lower()
+            value = str(attr.get('value', ''))
+            
+            if '超商類型' in name or 'cvscompany' in name:
+                if '7-eleven' in value.lower():
+                    store_info['cvs_company'] = '7-ELEVEN'
+                    store_info['logistics_subtype'] = 'UNIMARTC2C'
+                elif '全家' in value.lower() or 'family' in value.lower():
+                    store_info['cvs_company'] = '全家'
+                    store_info['logistics_subtype'] = 'FAMIC2C'
+            
+            if '門市代號' in name or 'cvsstore' in name:
+                store_info['cvs_store_id'] = value.strip()
+        
+        # Look in order notes
+        order_note = order.get('note', '')
+        if order_note:
+            # Look for store ID pattern in notes
+            import re
+            store_id_match = re.search(r'門市代號.*[：:]\s*(\d+)', order_note)
+            if store_id_match:
+                store_info['cvs_store_id'] = store_id_match.group(1).strip()
+            
+            # Look for store type
+            if '7-ELEVEN' in order_note:
+                store_info['cvs_company'] = '7-ELEVEN'
+                store_info['logistics_subtype'] = 'UNIMARTC2C'
+            elif '全家' in order_note:
+                store_info['cvs_company'] = '全家'
+                store_info['logistics_subtype'] = 'FAMIC2C'
+        
+        return store_info
+    
+    # Get store info from order
+    store_info = get_store_info_from_attributes(order)
+    
     # Logistics options
     logistics_options = {
         "UNIMARTC2C": "7-ELEVEN 超商交貨便",
@@ -229,141 +291,101 @@ def shopify_ecpay_ui(order, db):
         "OKMARTC2C": "OK超商店到店"
     }
     
-    # Helper function to extract attribute
-    def get_note_attribute(attributes, key_patterns):
-        for attr in attributes:
-            attr_name = attr.get('name', '').lower()
-            for pattern in key_patterns:
-                if pattern in attr_name:
-                    return str(attr.get('value', '')).strip()
-        return ''
-    
-    # Prepare customer and order information
-    customer = order.get('customer', {})
-    shipping_address = order.get('shipping_address', {})
-    note_attributes = order.get('note_attributes', [])
-    
-    # Compile customer name
-    customer_name = (
-        f"{customer.get('first_name', '')} {customer.get('last_name', '')}"
-    ).strip()
-    
-    # Extract logistics details
-    selected_logistics = get_note_attribute(
-        note_attributes, 
-        ['物流子代碼', 'logisticssubtype', 'logistics_subtype']
-    ) or "UNIMARTC2C"
-    
-    # Extract store ID
-    store_id = get_note_attribute(
-        note_attributes, 
-        ['門市代號', 'cvsstoreid', 'store_id']
-    ) or ''
-    
-    # Compute total amount
-    total_amount = int(float(order.get('total_price', '0')))
-    
-    # Prepare goods description
-    line_items = order.get('line_items', [])
-    items_desc = ", ".join([f"{item['title']} x {item['quantity']}" for item in line_items[:3]])
-    if len(line_items) > 3:
-        items_desc += f" 等{len(line_items)}項商品"
-    
-    # Trim description
-    items_desc = (items_desc[:47] + "...") if len(items_desc) > 47 else items_desc
-    
-    # UI Layout
     with st.container():
-        st.header(f"訂單 #{order['order_number']} 物流資訊")
+        st.subheader("綠界物流設定")
         
-        # Receiver Information
-        st.subheader("收件人資訊")
-        col1, col2, col3 = st.columns(3)
+        # Get customer info
+        customer_name = f"{order.get('customer', {}).get('first_name', '')} {order.get('customer', {}).get('last_name', '')}".strip()
+        
+        # Get shipping address and phone
+        shipping_address = order.get('shipping_address', {})
+        phone = shipping_address.get('phone', '')
+        
+        # Calculate order total
+        total_amount = int(float(order.get('total_price', '0')))
+        
+        col1, col2 = st.columns(2)
         
         with col1:
-            st.write("**收件人姓名**")
+            st.write("收件人資訊")
             receiver_name = st.text_input(
-                "姓名", 
+                "收件人姓名", 
                 value=customer_name, 
-                label_visibility="collapsed",
+                max_chars=10,  # Limit to 10 chars
+                help="姓名長度限制2~5個中文字或4~10個英文字",
                 key=f"name_{order['order_number']}"
             )
-        
-        with col2:
-            st.write("**收件人電話**")
             receiver_phone = st.text_input(
-                "電話", 
-                value=shipping_address.get('phone', ''), 
-                label_visibility="collapsed",
+                "收件人電話", 
+                value=phone, 
+                help="必須為09開頭的10碼數字",
                 key=f"phone_{order['order_number']}"
             )
-        
-        with col3:
-            st.write("**收件人 Email**")
             receiver_email = st.text_input(
-                "Email", 
+                "收件人 Email", 
                 value=order.get('email', ''), 
-                label_visibility="collapsed",
                 key=f"email_{order['order_number']}"
             )
         
-        # Logistics Information
-        st.subheader("物流設定")
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.write("**物流類型**")
+        with col2:
+            st.write("物流設定")
+            # Pre-select based on detected store type
+            default_logistics = store_info['logistics_subtype']
+            default_index = list(logistics_options.keys()).index(default_logistics) if default_logistics in logistics_options else 0
+            
             selected_logistics = st.selectbox(
                 "物流類型",
                 options=list(logistics_options.keys()),
-                index=list(logistics_options.keys()).index(selected_logistics),
+                index=default_index,
                 format_func=lambda x: logistics_options[x],
-                label_visibility="collapsed",
                 key=f"logistics_{order['order_number']}"
             )
-        
-        with col2:
-            st.write("**門市代號**")
+            
+            # Pre-fill detected store ID
             store_id = st.text_input(
                 "門市代號", 
-                value=store_id, 
-                label_visibility="collapsed",
+                value=store_info['cvs_store_id'] or '',
+                help="請填入正確的門市代號",
                 key=f"store_{order['order_number']}"
             )
-        
-        with col3:
-            st.write("**商品金額**")
+            
             goods_amount = st.number_input(
                 "商品金額",
                 min_value=1, 
                 max_value=20000,
                 value=total_amount,
-                label_visibility="collapsed",
+                help="金額必須在1-20000之間",
                 key=f"amount_{order['order_number']}"
             )
-        
-        # Additional Options
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.write("**商品描述**")
-            goods_name = st.text_input(
-                "商品描述",
-                value=items_desc,
-                max_chars=50,
-                label_visibility="collapsed",
-                key=f"goods_{order['order_number']}"
-            )
-        
-        with col2:
-            st.write("**代收貨款**")
+            
             is_collection = st.checkbox(
                 "代收貨款",
                 value=False,
+                help="勾選後，收件人須支付商品金額",
                 key=f"collection_{order['order_number']}"
             )
         
-        # Prepare callback URL
+        # Prepare goods description
+        items_desc = ", ".join([f"{item['title']} x {item['quantity']}" for item in order.get('line_items', [])][:3])
+        if len(order.get('line_items', [])) > 3:
+            items_desc += f" 等{len(order.get('line_items', []))}項商品"
+            
+        # Trim and clean description
+        if len(items_desc) > 45:
+            items_desc = items_desc[:45] + "..."
+        
+        import re
+        items_desc = re.sub(r'[^\w\s\u4e00-\u9fff,.]', '', items_desc)
+            
+        goods_name = st.text_input(
+            "商品描述",
+            value=items_desc,
+            max_chars=50,
+            help="商品描述不可包含特殊符號，長度限制50字元",
+            key=f"goods_{order['order_number']}"
+        )
+        
+        # Get domain for callback URL
         shopify_domain = order.get('shopify_domain', 'your-store.myshopify.com')
         callback_url = f"https://{shopify_domain}/admin/apps/ecpay-logistics/webhook"
         
@@ -385,7 +407,7 @@ def shopify_ecpay_ui(order, db):
         }
         
         # Render ECPay button
-        st.write("---")
+        st.divider()
         render_ecpay_button(
             order_id=str(order['order_number']),
             platform="shopify",

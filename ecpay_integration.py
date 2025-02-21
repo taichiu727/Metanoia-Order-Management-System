@@ -64,20 +64,46 @@ class ECPayLogistics:
     
     @staticmethod
     def create_logistics_order(order_data):
-        """Create a new logistics order with ECPay"""
-        # Prepare API parameters
+        """Create a new logistics order with ECPay
+        
+        Args:
+            order_data (dict): Order information including needed fields
+                    
+        Returns:
+            dict: Response from ECPay API
+        """
+        # Ensure unique MerchantTradeNo by appending timestamp
+        merchant_trade_no = order_data.get("MerchantTradeNo", "")
+        if merchant_trade_no:
+            merchant_trade_no = f"{merchant_trade_no}_{int(time.time())}"[-20:]  # Limit to 20 chars
+        
+        # Sanitize receiver name (max 5 Chinese chars or 10 English chars)
+        receiver_name = order_data.get("ReceiverName", "")
+        if len(receiver_name) > 10:
+            # Keep only the first 5 Chinese chars or 10 English chars
+            receiver_name = receiver_name[:10]
+        
+        # Sanitize goods name (max 50 chars, no special symbols)
+        goods_name = order_data.get("GoodsName", "")
+        if len(goods_name) > 45:
+            goods_name = goods_name[:45] + "..."
+        
+        # Strip emoji and special chars from goods name
+        import re
+        goods_name = re.sub(r'[^\w\s\u4e00-\u9fff,.]', '', goods_name)
+        
+        # Prepare API parameters in proper x-www-form-urlencoded format
         params = {
             "MerchantID": ECPAY_MERCHANT_ID,
-            # Add all required fields, ensuring proper formatting
-            "MerchantTradeNo": order_data.get("MerchantTradeNo", "") + str(int(time.time()))[-5:],  # Add timestamp suffix to ensure uniqueness
+            "MerchantTradeNo": merchant_trade_no,
             "MerchantTradeDate": order_data.get("MerchantTradeDate", ""),
             "LogisticsType": order_data.get("LogisticsType", "CVS"),
             "LogisticsSubType": order_data.get("LogisticsSubType", ""),
             "GoodsAmount": order_data.get("GoodsAmount", 0),
-            "GoodsName": order_data.get("GoodsName", ""),
+            "GoodsName": goods_name,
             "SenderName": order_data.get("SenderName", ""),
             "SenderCellPhone": order_data.get("SenderCellPhone", ""),
-            "ReceiverName": order_data.get("ReceiverName", ""),
+            "ReceiverName": receiver_name,
             "ReceiverCellPhone": order_data.get("ReceiverCellPhone", ""),
             "ReceiverEmail": order_data.get("ReceiverEmail", ""),
             "ReceiverStoreID": order_data.get("ReceiverStoreID", ""),
@@ -85,58 +111,85 @@ class ECPayLogistics:
             "IsCollection": order_data.get("IsCollection", "N")
         }
         
-        # Print raw parameters for debugging
-        print("Request Parameters:")
+        # Add optional fields if present
+        optional_fields = [
+            "SenderPhone", "ReceiverPhone", "TradeDesc", 
+            "Remark", "PlatformID", "ReturnStoreID"
+        ]
+        for field in optional_fields:
+            if field in order_data and order_data[field]:
+                params[field] = order_data[field]
+        
+        # Debug log - print request parameters
+        print("ECPay Request Parameters:")
         for key, value in params.items():
             print(f"{key}: {value}")
         
-        # Generate CheckMacValue2
+        # Generate CheckMacValue
         params["CheckMacValue"] = ECPayLogistics.create_check_mac_value(params)
         
-        # Send request to ECPay
+        # Send request to ECPay with proper Content-Type
         url = ECPAY_CONFIG[ECPAY_ENV]["create_order"]
-        print(f"Sending request to: {url}")
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "text/html"
+        }
         
         try:
-            response = requests.post(url, data=params)
+            response = requests.post(url, data=params, headers=headers)
+            status_code = response.status_code
+            content_type = response.headers.get("content-type", "")
+            content = response.text
             
-            print(f"Status Code: {response.status_code}")
-            print(f"Response Content-Type: {response.headers.get('content-type', '')}")
-            print(f"Response Content: {response.text}")
+            print(f"ECPay Response Status: {status_code}")
+            print(f"ECPay Response Content-Type: {content_type}")
+            print(f"ECPay Response Content: {content}")
             
-            if response.status_code != 200:
+            if status_code != 200:
                 return {
                     "error": True, 
-                    "message": f"HTTP error: {response.status_code}", 
-                    "details": response.text
+                    "message": f"HTTP error: {status_code}", 
+                    "details": content
                 }
             
-            # Parse response
+            # Parse response based on content type
             try:
-                # First try to parse as JSON
-                if response.text.strip().startswith('{'):
+                # HTML response with key-value pairs
+                if "text/html" in content_type:
+                    result = {}
+                    lines = content.strip().split('&')
+                    for line in lines:
+                        if '=' in line:
+                            key, value = line.split('=', 1)
+                            result[key] = value
+                    
+                    # If result is empty but we have content, return it for debugging
+                    if not result and content:
+                        return {
+                            "rawResponse": content,
+                            "status": status_code,
+                            "contentType": content_type
+                        }
+                        
+                    return result
+                    
+                # JSON response
+                elif "application/json" in content_type:
                     return response.json()
-                
-                # Otherwise parse the key=value format
-                result = {}
-                for line in response.text.split('&'):
-                    if '=' in line:
-                        key, value = line.split('=', 1)
-                        result[key] = value
-                
-                # If result is empty, return the raw response
-                if not result:
+                    
+                # Other response types
+                else:
                     return {
-                        "rawResponse": response.text,
-                        "status": response.status_code
+                        "rawResponse": content,
+                        "status": status_code,
+                        "contentType": content_type
                     }
                     
-                return result
             except Exception as e:
                 return {
                     "error": True, 
                     "message": f"Failed to parse response: {str(e)}", 
-                    "details": response.text
+                    "details": content
                 }
         except Exception as e:
             return {
