@@ -1623,7 +1623,7 @@ def shopify_order_editor(order_data, order_num, filtered_df, db, unique_key=None
         # Rest of the existing function remains the same...
         st.write(f"Shipping Address: {order_data['Shipping Address'].iloc[0]}")
         
-        # Create order editor with unique key333324
+        # Create order editor with unique key
         editor_key = f"editor_{unique_key}"
         display_columns = [
             "Order Number", "Created", "Deadline", "Product", 
