@@ -14,11 +14,13 @@ ECPAY_CONFIG = {
     "test": {
         "create_order": "https://logistics-stage.ecpay.com.tw/Express/Create",
         "print_unimart_c2c": "https://logistics-stage.ecpay.com.tw/Express/PrintUniMartC2COrderInfo",
+        "query_logistics": "https://logistics-stage.ecpay.com.tw/Helper/QueryLogisticsTradeInfo/V5",
         "print_fami_c2c": "https://logistics-stage.ecpay.com.tw/Express/PrintFAMIC2COrderInfo"
     },
     "production": {
         "create_order": "https://logistics.ecpay.com.tw/Express/Create",
         "print_unimart_c2c": "https://logistics.ecpay.com.tw/Express/PrintUniMartC2COrderInfo",
+        "query_logistics": "https://logistics.ecpay.com.tw/Helper/QueryLogisticsTradeInfo/V5",
         "print_fami_c2c": "https://logistics.ecpay.com.tw/Express/PrintFAMIC2COrderInfo"
     }
 }
@@ -208,7 +210,74 @@ class ECPayLogistics:
                 "error": True, 
                 "message": f"Request error: {str(e)}"
             }
-    
+    @staticmethod
+    def query_logistics_order(AllPayLogisticsID=None, MerchantTradeNo=None):
+        """
+        Query logistics order information from ECPay
+        
+        Args:
+            AllPayLogisticsID (str, optional): ECPay's logistics transaction ID
+            MerchantTradeNo (str, optional): Merchant's trade number
+        
+        Returns:
+            dict: Logistics order information
+        """
+        # Validate input
+        if not AllPayLogisticsID and not MerchantTradeNo:
+            raise ValueError("Either AllPayLogisticsID or MerchantTradeNo must be provided")
+        
+        # Determine environment URL
+        url = ECPAY_CONFIG[ECPAY_ENV]["query_logistics"]
+        
+        # Prepare parameters
+        params = {
+            "MerchantID": ECPAY_MERCHANT_ID,
+            "TimeStamp": int(time.time())  # Current Unix timestamp
+        }
+        
+        # Add either logistics ID or merchant trade number
+        if AllPayLogisticsID:
+            params["AllPayLogisticsID"] = AllPayLogisticsID
+        elif MerchantTradeNo:
+            params["MerchantTradeNo"] = MerchantTradeNo
+        
+        # Generate CheckMacValue
+        params["CheckMacValue"] = ECPayLogistics.create_check_mac_value(params)
+        
+        try:
+            # Send request
+            response = requests.post(
+                url, 
+                data=params, 
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Accept": "text/html"
+                }
+            )
+            
+            # Check response
+            if response.status_code != 200:
+                return {
+                    "error": True,
+                    "message": f"HTTP error: {response.status_code}",
+                    "details": response.text
+                }
+            
+            # Parse response
+            result = {}
+            lines = response.text.strip().split('&')
+            for line in lines:
+                if '=' in line:
+                    key, value = line.split('=', 1)
+                    result[key] = value
+            
+            return result
+        
+        except Exception as e:
+            return {
+                "error": True,
+                "message": str(e)
+            }
     @staticmethod
     def print_shipping_document(logistics_id, payment_no, validation_no=None, document_type="UNIMARTC2C"):
         """Generate shipping document for printing in a new tab

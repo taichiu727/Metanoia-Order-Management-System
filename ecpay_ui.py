@@ -62,7 +62,7 @@ def settings_ui(db):
 
 
 def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
-    """Render ECPay logistics button with enhanced debugging
+    """Render ECPay logistics button with flexible printing
     
     Args:
         order_id (str): Order ID
@@ -131,6 +131,7 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                             "order_id": order_id,
                             "platform": platform,
                             "ecpay_logistics_id": response.get("AllPayLogisticsID", ""),
+                            "merchant_trade_no": order_request.get("MerchantTradeNo", ""),
                             "logistics_type": "CVS",
                             "logistics_sub_type": order_request.get('LogisticsSubType', 'UNIMARTC2C'),
                             "store_id": order_request.get('ReceiverStoreID', ''),
@@ -161,63 +162,50 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
         # Always show print button
         if st.button("列印託運單", key=f"print_{order_id}"):
             try:
-                # Debug: Print out all input parameters
-                st.write("Debug Information:")
+                # Debug print of input data
+                st.write("Debug: Order Information")
                 st.write(f"Order ID: {order_id}")
                 st.write(f"Platform: {platform}")
-                st.write(f"Logistics Data: {logistics_data}")
+                st.write("Logistics Data:", logistics_data)
                 
-                # Attempt to retrieve existing logistics order from database
-                existing_order = None
-                try:
-                    existing_order = db.get_logistics_order(order_id, platform)
-                    st.write("Existing Order from Database:", existing_order)
-                except Exception as e:
-                    st.error(f"Database query error: {str(e)}")
+                # Prepare print parameters using logistics data
+                store_id = logistics_data.get('store_id', '')
+                merchant_trade_no = f"{platform[:2].upper()}{order_id}"
                 
-                # Fallback mechanism using logistics data
-                if not existing_order:
-                    st.warning("未找到現有物流訂單，嘗試使用提供的物流資料")
+                # Attempt to query existing logistics information
+                query_response = ECPayLogistics.query_logistics_order(MerchantTradeNo=merchant_trade_no)
+                
+                # Extract printing parameters from query response
+                if not query_response.get('error'):
+                    # Use query response details for printing
+                    AllPayLogisticsID = query_response.get('AllPayLogisticsID')
+                    CVSPaymentNo = query_response.get('CVSPaymentNo')
+                    CVSValidationNo = query_response.get('CVSValidationNo', '')
                     
-                    # Use logistics data as fallback
-                    AllPayLogisticsID = logistics_data.get('logistics_id', '')
-                    CVSPaymentNo = logistics_data.get('payment_no', '')
-                    CVSValidationNo = logistics_data.get('validation_no', '')
-                    document_type = logistics_data.get('logistics_subtype', 'UNIMARTC2C')
-                else:
-                    # Use existing order details
-                    AllPayLogisticsID = existing_order.get('ecpay_logistics_id')
-                    CVSPaymentNo = existing_order.get('cvs_payment_no')
-                    CVSValidationNo = existing_order.get('cvs_validation_no', '')
-                    
-                    # Determine document type based on logistics subtype
-                    logistics_subtype = existing_order.get('logistics_sub_type', '')
-                    if "UNIMART" in logistics_subtype:
-                        document_type = "UNIMARTC2C"
-                    elif "FAMI" in logistics_subtype:
+                    document_type = "UNIMARTC2C"  # Default to 7-ELEVEN
+                    if store_id and store_id.startswith('1'):  # Assuming Family Mart stores start with 1
                         document_type = "FAMIC2C"
-                    else:
-                        document_type = "UNIMARTC2C"  # Default to 7-ELEVEN
                 
-                # Validate required parameters
-                if not AllPayLogisticsID or not CVSPaymentNo:
-                    st.error("缺少必要的物流資訊")
-                    st.write("Debug Details:")
-                    st.write(f"AllPayLogisticsID: {AllPayLogisticsID}")
-                    st.write(f"CVSPaymentNo: {CVSPaymentNo}")
-                    return
-                
-                # Print shipping document
-                form_html = ECPayLogistics.print_shipping_document(
-                    AllPayLogisticsID=AllPayLogisticsID,
-                    CVSPaymentNo=CVSPaymentNo,
-                    CVSValidationNo=CVSValidationNo,
-                    document_type=document_type
-                )
-                
-                # Display the form for auto-submission
-                st.components.v1.html(form_html, height=500, scrolling=True)
-                st.success("正在開啟物流單列印視窗，請等待...")
+                    # Validate required parameters
+                    if not AllPayLogisticsID or not CVSPaymentNo:
+                        st.error("無法取得物流單資訊")
+                        st.write("Query Response:", query_response)
+                        return
+                    
+                    # Print shipping document
+                    form_html = ECPayLogistics.print_shipping_document(
+                        AllPayLogisticsID=AllPayLogisticsID,
+                        CVSPaymentNo=CVSPaymentNo,
+                        CVSValidationNo=CVSValidationNo,
+                        document_type=document_type
+                    )
+                    
+                    # Display the form for auto-submission
+                    st.components.v1.html(form_html, height=500, scrolling=True)
+                    st.success("正在開啟物流單列印視窗，請等待...")
+                else:
+                    st.error("無法查詢物流單資訊")
+                    st.write("Query Error:", query_response)
             
             except Exception as e:
                 st.error(f"列印託運單時發生錯誤: {str(e)}")
