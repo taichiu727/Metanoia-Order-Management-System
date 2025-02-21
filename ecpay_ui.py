@@ -161,18 +161,37 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
         # Always show print button
         if st.button("列印託運單", key=f"print_{order_id}"):
             try:
-                # Prepare parameters for printing
-                # You might want to adjust these based on your actual data
-                form_html = ECPayLogistics.print_shipping_document(
-                    logistics_id="placeholder_id",  # You'll need to replace with actual ID
-                    payment_no="placeholder_payment_no",  # Replace with actual payment number
-                    validation_no="",  # Optional
-                    document_type="UNIMARTC2C"  # Default to 7-ELEVEN
-                )
+                # Try to retrieve existing logistics order from database
+                existing_order = db.get_logistics_order(order_id, platform)
                 
-                # Display the form for auto-submission
-                st.components.v1.html(form_html, height=500, scrolling=True)
-                st.success("正在開啟物流單列印視窗，請等待...")
+                if existing_order:
+                    # Use existing order details for printing
+                    AllPayLogisticsID = existing_order.get('ecpay_logistics_id')
+                    CVSPaymentNo = existing_order.get('cvs_payment_no')
+                    CVSValidationNo = existing_order.get('cvs_validation_no', '')
+                    
+                    # Determine document type based on logistics subtype
+                    logistics_subtype = existing_order.get('logistics_sub_type', '')
+                    if "UNIMART" in logistics_subtype:
+                        document_type = "UNIMARTC2C"
+                    elif "FAMI" in logistics_subtype:
+                        document_type = "FAMIC2C"
+                    else:
+                        document_type = "UNIMARTC2C"  # Default to 7-ELEVEN
+                    
+                    # Print using existing order details
+                    form_html = ECPayLogistics.print_shipping_document(
+                        AllPayLogisticsID=AllPayLogisticsID,
+                        CVSPaymentNo=CVSPaymentNo,
+                        CVSValidationNo=CVSValidationNo,
+                        document_type=document_type
+                    )
+                    
+                    # Display the form for auto-submission
+                    st.components.v1.html(form_html, height=500, scrolling=True)
+                    st.success("正在開啟物流單列印視窗，請等待...")
+                else:
+                    st.error("無法找到物流訂單資訊")
             
             except Exception as e:
                 st.error(f"列印託運單時發生錯誤: {str(e)}")
