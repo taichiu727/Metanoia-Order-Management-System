@@ -90,7 +90,7 @@ class ECPayLogistics:
         for key, value in params.items():
             print(f"{key}: {value}")
         
-        # Generate CheckMacValue
+        # Generate CheckMacValue2
         params["CheckMacValue"] = ECPayLogistics.create_check_mac_value(params)
         
         # Send request to ECPay
