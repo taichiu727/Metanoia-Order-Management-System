@@ -61,8 +61,28 @@ def settings_ui(db):
         st.error("未找到 ECPay 憑證，請檢查 Streamlit 密鑰設定")
 
 
+def truncate_goods_name(goods_name):
+    """
+    Truncate goods name to maximum 25 characters
+    
+    Args:
+        goods_name (str): Original goods name
+    
+    Returns:
+        str: Truncated goods name
+    """
+    # Remove any special characters
+    import re
+    cleaned_name = re.sub(r'[^\w\s\u4e00-\u9fff,.]', '', goods_name)
+    
+    # Truncate to 25 characters
+    if len(cleaned_name) > 25:
+        return cleaned_name[:22] + "..."
+    
+    return cleaned_name
+
 def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
-    """Render ECPay logistics button with comprehensive error handling
+    """Render ECPay logistics button with 25-character goods name limit
     
     Args:
         order_id (str): Order ID
@@ -98,14 +118,14 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                 if receiver_name and len(receiver_name) > 10:  # Limit to max 10 chars
                     receiver_name = receiver_name[:10]
                 
-                # Simplify goods name 
-                goods_name = logistics_data.get('goods_name', '商品')
-                if goods_name and len(goods_name) > 45:
-                    goods_name = goods_name[:45] + "..."
+                # Truncate goods name to 25 characters
+                goods_name = truncate_goods_name(logistics_data.get('goods_name', '商品'))
                 
-                # Prepare order data for ECPay
+                # Use Shopify order number directly as MerchantTradeNo
+                merchant_trade_no = f"#{order_id}"
+                
                 order_request = {
-                    "MerchantTradeNo": f"{platform[:2].upper()}{order_id}_{int(time.time() % 10000)}",
+                    "MerchantTradeNo": merchant_trade_no,
                     "MerchantTradeDate": current_time,
                     "LogisticsType": "CVS",
                     "LogisticsSubType": logistics_data.get('logistics_subtype', 'UNIMARTC2C'),
@@ -131,7 +151,7 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                             "order_id": order_id,
                             "platform": platform,
                             "ecpay_logistics_id": response.get("AllPayLogisticsID", ""),
-                            "merchant_trade_no": order_request.get("MerchantTradeNo", ""),
+                            "merchant_trade_no": merchant_trade_no,
                             "logistics_type": "CVS",
                             "logistics_sub_type": order_request.get('LogisticsSubType', 'UNIMARTC2C'),
                             "store_id": order_request.get('ReceiverStoreID', ''),
@@ -169,11 +189,9 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                 st.write("Logistics Data:", logistics_data)
                 
                 # Prepare query parameters
-                query_params = {}
-                
-                # Try to use merchant trade number
-                merchant_trade_no = f"{platform[:2].upper()}{order_id}"
-                query_params['MerchantTradeNo'] = merchant_trade_no
+                query_params = {
+                    'MerchantTradeNo': f"#{order_id}"
+                }
                 
                 # Query logistics order
                 query_response = ECPayLogistics.query_logistics_order(**query_params)
