@@ -144,11 +144,6 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                 # Use Shopify order number EXACTLY as #1213
                 merchant_trade_no = f"#{order_id}"
                 
-                # Detailed logging of merchant trade number
-                st.write(f"Debug: Merchant Trade Number: {merchant_trade_no}")
-                st.write(f"Debug: Order ID: {order_id}")
-                st.write(f"Debug: Platform: {platform}")
-                
                 order_request = {
                     "MerchantTradeNo": merchant_trade_no,
                     "MerchantTradeDate": current_time,
@@ -166,18 +161,9 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                     "IsCollection": logistics_data.get('is_collection', 'N')
                 }
                 
-                # Additional logging of request details
-                st.write("Debug: Full Order Request:")
-                for key, value in order_request.items():
-                    st.write(f"{key}: {value}")
-                
                 # Create logistics order
                 with st.spinner("建立物流單中..."):
                     response = ECPayLogistics.create_logistics_order(order_request)
-                    
-                    # Log full response
-                    st.write("Debug: API Response:")
-                    st.json(response)
                     
                     if "RtnCode" in response and response["RtnCode"] == "1":
                         # Success - save to database if possible
@@ -242,11 +228,11 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                 if store_id and store_id.startswith('1'):  # Assuming Family Mart stores start with 1
                     document_type = "FAMIC2C"
                 
-                # Print shipping document
+                # Print shipping document with correct parameter names
                 form_html = ECPayLogistics.print_shipping_document(
-                    AllPayLogisticsID=query_response.get('AllPayLogisticsID'),
-                    CVSPaymentNo=query_response.get('CVSPaymentNo'),
-                    CVSValidationNo=query_response.get('CVSValidationNo', ''),
+                    logistics_id=query_response.get('AllPayLogisticsID'),
+                    payment_no=query_response.get('CVSPaymentNo'),
+                    validation_no=query_response.get('CVSValidationNo', ''),
                     document_type=document_type
                 )
                 
