@@ -196,7 +196,7 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                             st.components.v1.html(form_html, height=0)
                             st.success("託運單開啟中，請稍候...")
                         
-                        # Rerun to refresh the UI
+                        # Rerun to refresh the UI3
                      
                     else:
                         # Error
