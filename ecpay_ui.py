@@ -78,22 +78,52 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
         # Order already has ECPay logistics, show status and options
         st.success(f"已建立綠界物流單 (ID: {existing_order['ecpay_logistics_id']})")
         
-        # Print shipping document button with fixed implementation
-        if st.button("列印託運單", key=f"print_{order_id}"):
-            # Directly pass the entire existing order to the print function
-            try:
-                print_shipping_document(existing_order)
-            except Exception as e:
-                st.error(f"列印失敗: {str(e)}")
+        col1, col2 = st.columns(2)
         
-        # Status query button
-        if st.button("查詢物流狀態", key=f"status_{order_id}"):
-            st.info(f"物流狀態: {existing_order.get('status_msg', '未知')}")
-            if existing_order.get('tracking_number'):
-                st.info(f"追蹤號碼: {existing_order['tracking_number']}")
+        with col1:
+            # Print shipping document button
+            if st.button("列印託運單", key=f"print_{order_id}"):
+                try:
+                    # Ensure all required parameters are present
+                    logistics_id = existing_order.get('ecpay_logistics_id')
+                    payment_no = existing_order.get('cvs_payment_no')
+                    validation_no = existing_order.get('cvs_validation_no', '')
+                    logistics_subtype = existing_order.get('logistics_sub_type', '')
+                    
+                    # Determine document type
+                    if "UNIMART" in logistics_subtype:
+                        document_type = "UNIMARTC2C"
+                    elif "FAMI" in logistics_subtype:
+                        document_type = "FAMIC2C"
+                    else:
+                        document_type = "UNIMARTC2C"  # Default to 7-ELEVEN
+                    
+                    # Print shipping document
+                    form_html = ECPayLogistics.print_shipping_document(
+                        logistics_id=logistics_id,
+                        payment_no=payment_no,
+                        validation_no=validation_no,
+                        document_type=document_type
+                    )
+                    
+                    # Display the form for auto-submission
+                    st.components.v1.html(form_html, height=500, scrolling=True)
+                    st.success(f"正在開啟 {document_type} 物流單列印視窗，請等待...")
+                
+                except Exception as e:
+                    st.error(f"列印託運單時發生錯誤: {str(e)}")
+                    import traceback
+                    st.error(traceback.format_exc())
+        
+        with col2:
+            # Status query button
+            if st.button("查詢物流狀態", key=f"status_{order_id}"):
+                st.info(f"物流狀態: {existing_order.get('status_msg', '未知')}")
+                if existing_order.get('tracking_number'):
+                    st.info(f"追蹤號碼: {existing_order['tracking_number']}")
     
     else:
-        # Original create logistics order code remains the same
+        # Order doesn't have ECPay logistics yet, show create button
         if st.button("建立綠界物流單", key=f"create_ecpay_{order_id}"):
             try:
                 # Use Streamlit secrets for credentials
@@ -143,15 +173,7 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                 
                 # Create logistics order
                 with st.spinner("建立物流單中..."):
-                    # Show request details for debugging
-                    st.write("送出請求資料:")
-                    st.json(order_request)
-                    
                     response = ECPayLogistics.create_logistics_order(order_request)
-                    
-                    # Show complete response for debugging
-                    st.write("API 回應:")
-                    st.json(response)
                     
                     if "RtnCode" in response and response["RtnCode"] == "1":
                         # Success - store the logistics order information
@@ -177,23 +199,6 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                             st.info(f"寄貨編號: {response['CVSPaymentNo']}")
                         if "CVSValidationNo" in response:
                             st.info(f"驗證碼: {response['CVSValidationNo']}")
-                            
-                        # Show print button
-                        if st.button("列印託運單", key=f"print_new_{order_id}"):
-                            logistics_id = response.get("AllPayLogisticsID", "")
-                            payment_no = response.get("CVSPaymentNo", "")
-                            validation_no = response.get("CVSValidationNo", "")
-                            doc_type = "UNIMARTC2C" if "UNIMART" in order_request.get('LogisticsSubType', '') else "FAMIC2C"
-                            
-                            form_html = ECPayLogistics.print_shipping_document(
-                                logistics_id=logistics_id,
-                                payment_no=payment_no,
-                                validation_no=validation_no,
-                                document_type=doc_type
-                            )
-                            
-                            st.components.v1.html(form_html, height=0)
-                            st.success("託運單開啟中，請稍候...")
                         
                         # Rerun to refresh the UI
                         st.rerun()
@@ -202,13 +207,6 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                         error_msg = response.get("RtnMsg", "未知錯誤")
                         error_code = response.get("RtnCode", "")
                         st.error(f"建立物流單失敗: {error_msg} (錯誤代碼: {error_code})")
-                        
-                        # Show detailed troubleshooting information
-                        st.error("可能的問題:")
-                        st.error("1. 超商門市代號錯誤或不存在 (檢查門市代號是否正確)")
-                        st.error("2. 商品金額超出允許範圍1-20000元")
-                        st.error("3. 收件人姓名或手機格式不正確 (姓名不可有數字，手機須為09開頭10碼)")
-                        st.error("4. 交易編號重複 (請等待一分鐘後重試)")
                         
             except Exception as e:
                 st.error(f"建立物流單時發生錯誤: {str(e)}")
