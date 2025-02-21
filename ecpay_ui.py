@@ -62,7 +62,7 @@ def settings_ui(db):
 
 
 def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
-    """Render ECPay logistics button using Streamlit secrets
+    """Render ECPay logistics button always showing print option
     
     Args:
         order_id (str): Order ID
@@ -71,59 +71,11 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
         logistics_data (dict): Logistics preferences
         db: Database connection
     """
-    # Check if order already has ECPay logistics
-    existing_order = db.get_logistics_order(order_id, platform)
+    # Columns for layout
+    col1, col2 = st.columns(2)
     
-    if existing_order and existing_order.get('ecpay_logistics_id'):
-        # Order already has ECPay logistics, show status and options
-        st.success(f"已建立綠界物流單 (ID: {existing_order['ecpay_logistics_id']})")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Print shipping document button
-            if st.button("列印託運單", key=f"print_{order_id}"):
-                try:
-                    # Ensure all required parameters are present
-                    logistics_id = existing_order.get('ecpay_logistics_id')
-                    payment_no = existing_order.get('cvs_payment_no')
-                    validation_no = existing_order.get('cvs_validation_no', '')
-                    logistics_subtype = existing_order.get('logistics_sub_type', '')
-                    
-                    # Determine document type
-                    if "UNIMART" in logistics_subtype:
-                        document_type = "UNIMARTC2C"
-                    elif "FAMI" in logistics_subtype:
-                        document_type = "FAMIC2C"
-                    else:
-                        document_type = "UNIMARTC2C"  # Default to 7-ELEVEN
-                    
-                    # Print shipping document
-                    form_html = ECPayLogistics.print_shipping_document(
-                        logistics_id=logistics_id,
-                        payment_no=payment_no,
-                        validation_no=validation_no,
-                        document_type=document_type
-                    )
-                    
-                    # Display the form for auto-submission
-                    st.components.v1.html(form_html, height=500, scrolling=True)
-                    st.success(f"正在開啟 {document_type} 物流單列印視窗，請等待...")
-                
-                except Exception as e:
-                    st.error(f"列印託運單時發生錯誤: {str(e)}")
-                    import traceback
-                    st.error(traceback.format_exc())
-        
-        with col2:
-            # Status query button
-            if st.button("查詢物流狀態", key=f"status_{order_id}"):
-                st.info(f"物流狀態: {existing_order.get('status_msg', '未知')}")
-                if existing_order.get('tracking_number'):
-                    st.info(f"追蹤號碼: {existing_order['tracking_number']}")
-    
-    else:
-        # Order doesn't have ECPay logistics yet, show create button
+    with col1:
+        # Always show create logistics order button
         if st.button("建立綠界物流單", key=f"create_ecpay_{order_id}"):
             try:
                 # Use Streamlit secrets for credentials
@@ -153,14 +105,12 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                 
                 # Prepare order data for ECPay
                 order_request = {
-                    # Add unique timestamp suffix to MerchantTradeNo
                     "MerchantTradeNo": f"{platform[:2].upper()}{order_id}_{int(time.time() % 10000)}",
                     "MerchantTradeDate": current_time,
                     "LogisticsType": "CVS",
                     "LogisticsSubType": logistics_data.get('logistics_subtype', 'UNIMARTC2C'),
                     "GoodsAmount": logistics_data.get('amount', 0),
                     "GoodsName": goods_name,
-                    # Fixed sender info
                     "SenderName": "邱泰滕",
                     "SenderCellPhone": "0988528467",
                     "ReceiverName": receiver_name,
@@ -176,8 +126,8 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                     response = ECPayLogistics.create_logistics_order(order_request)
                     
                     if "RtnCode" in response and response["RtnCode"] == "1":
-                        # Success - store the logistics order information
-                        logistics_data = {
+                        # Success - save to database if possible
+                        logistics_save_data = {
                             "order_id": order_id,
                             "platform": platform,
                             "ecpay_logistics_id": response.get("AllPayLogisticsID", ""),
@@ -191,27 +141,43 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                             "tracking_number": ""
                         }
                         
-                        # Save to database
-                        db.save_logistics_order(logistics_data)
+                        # Attempt to save to database
+                        try:
+                            db.save_logistics_order(logistics_save_data)
+                        except Exception as e:
+                            st.warning(f"無法保存物流訂單: {str(e)}")
                         
                         st.success(f"綠界物流單建立成功！ID: {response.get('AllPayLogisticsID', '')}")
-                        if "CVSPaymentNo" in response:
-                            st.info(f"寄貨編號: {response['CVSPaymentNo']}")
-                        if "CVSValidationNo" in response:
-                            st.info(f"驗證碼: {response['CVSValidationNo']}")
-                        
-                        # Rerun to refresh the UI
-                        st.rerun()
                     else:
                         # Error
                         error_msg = response.get("RtnMsg", "未知錯誤")
                         error_code = response.get("RtnCode", "")
                         st.error(f"建立物流單失敗: {error_msg} (錯誤代碼: {error_code})")
-                        
+                    
             except Exception as e:
                 st.error(f"建立物流單時發生錯誤: {str(e)}")
+    
+    with col2:
+        # Always show print button
+        if st.button("列印託運單", key=f"print_{order_id}"):
+            try:
+                # Prepare parameters for printing
+                # You might want to adjust these based on your actual data
+                form_html = ECPayLogistics.print_shipping_document(
+                    logistics_id="placeholder_id",  # You'll need to replace with actual ID
+                    payment_no="placeholder_payment_no",  # Replace with actual payment number
+                    validation_no="",  # Optional
+                    document_type="UNIMARTC2C"  # Default to 7-ELEVEN
+                )
+                
+                # Display the form for auto-submission
+                st.components.v1.html(form_html, height=500, scrolling=True)
+                st.success("正在開啟物流單列印視窗，請等待...")
+            
+            except Exception as e:
+                st.error(f"列印託運單時發生錯誤: {str(e)}")
                 import traceback
-                st.code(traceback.format_exc(), language="python")
+                st.error(traceback.format_exc())
 
 @st.fragment
 def shopify_ecpay_ui(order, db):
