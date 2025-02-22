@@ -2026,6 +2026,165 @@ def get_column_config():
         "Note": st.column_config.TextColumn("Note", width="medium", default="")
     }
 
+def create_html_gallery(gallery_data):
+    """Create an HTML-based image gallery from gallery data"""
+    html = """
+    <style>
+        .gallery-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        .gallery-item {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            width: calc(50% - 0.5rem);
+            margin-bottom: 1rem;
+        }
+        .gallery-header {
+            padding: 0.5rem;
+            background-color: #f0f7ff;
+            border-bottom: 1px solid #ddd;
+        }
+        .gallery-title {
+            margin: 0;
+            font-size: 1rem;
+            font-weight: 500;
+        }
+        .gallery-subtitle {
+            margin: 0;
+            font-size: 0.8rem;
+            color: #666;
+        }
+        .main-image-container {
+            display: flex;
+            justify-content: center;
+            padding: 0.5rem;
+            background-color: white;
+            min-height: 200px;
+            align-items: center;
+        }
+        .main-image {
+            max-height: 200px;
+            max-width: 100%;
+            object-fit: contain;
+        }
+        .thumbnails {
+            display: flex;
+            overflow-x: auto;
+            padding: 0.5rem;
+            background-color: #f9f9f9;
+            gap: 0.25rem;
+        }
+        .thumbnail {
+            width: 50px;
+            height: 50px;
+            object-fit: cover;
+            border: 1px solid #ddd;
+            cursor: pointer;
+        }
+        .thumbnail.active {
+            border: 2px solid #1e88e5;
+        }
+        /* Media query for mobile screens */
+        @media (max-width: 600px) {
+            .gallery-item {
+                width: 100%;
+            }
+        }
+    </style>
+    
+    <div class="gallery-container">
+    """
+    
+    for i, product in enumerate(gallery_data):
+        product_name = product['productName']
+        item_spec = product['itemSpec']
+        images = product['images']
+        
+        if not images:
+            continue
+            
+        image_id_prefix = f"gallery_product_{i}"
+        
+        html += f"""
+        <div class="gallery-item">
+            <div class="gallery-header">
+                <h4 class="gallery-title">{product_name}</h4>
+                <p class="gallery-subtitle">{item_spec}</p>
+            </div>
+            <div class="main-image-container">
+                <img id="{image_id_prefix}_main" src="{images[0]}" class="main-image" alt="{product_name}">
+            </div>
+            <div class="thumbnails">
+        """
+        
+        for j, img_url in enumerate(images):
+            active_class = "active" if j == 0 else ""
+            html += f"""
+                <img 
+                    src="{img_url}" 
+                    class="thumbnail {active_class}" 
+                    onclick="updateMainImage('{image_id_prefix}_main', '{img_url}', this)"
+                    alt="Thumbnail {j+1}">
+            """
+            
+        html += """
+            </div>
+        </div>
+        """
+    
+    html += """
+    </div>
+    
+    <script>
+        function updateMainImage(mainImageId, newSrc, thumbElement) {
+            // Update main image
+            document.getElementById(mainImageId).src = newSrc;
+            
+            // Update active state of thumbnails
+            const thumbnails = thumbElement.parentNode.querySelectorAll('.thumbnail');
+            thumbnails.forEach(thumb => {
+                thumb.classList.remove('active');
+            });
+            thumbElement.classList.add('active');
+        }
+    </script>
+    """
+    
+    return html
+
+# Usage in order_editor
+def display_image_gallery(order_data, unique_key):
+    """Display image gallery for order data"""
+    if 'All Images' not in order_data.columns:
+        return
+        
+    st.subheader("Product Images")
+    gallery_data = []
+    
+    for idx, row in order_data.iterrows():
+        try:
+            all_images = json.loads(row['All Images']) if isinstance(row['All Images'], str) else []
+            if all_images:
+                gallery_data.append({
+                    "productName": row["Product"],
+                    "itemSpec": row["Item Spec"],
+                    "images": all_images
+                })
+        except Exception as e:
+            st.error(f"Error parsing images: {str(e)}")
+    
+    if gallery_data:
+        # Create HTML gallery and render it
+        gallery_html = create_html_gallery(gallery_data)
+        st.components.v1.html(gallery_html, height=max(300, len(gallery_data) * 350), scrolling=True)
+    else:
+        st.info("No product images available for this order")
+
 @st.fragment
 def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
     all_received = all(order_data['Received'])
@@ -2042,36 +2201,37 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
         # New section for displaying all product images
         if 'All Images' in order_data.columns:
             st.subheader("Product Images")
-            all_image_rows = []
             
-            for idx, row in order_data.iterrows():
+            # Prepare data for the gallery component
+            gallery_data = prepare_gallery_data(order_data)
+            
+            if gallery_data:
+                # Use the React component to display the gallery
+                from streamlit_elements import elements
+                
                 try:
-                    # Parse the JSON string to get all image URLs
-                    all_images = json.loads(row['All Images']) if isinstance(row['All Images'], str) else []
-                    
-                    if all_images:
-                        all_image_rows.append({
-                            "Product": row["Product"], 
-                            "Item Spec": row["Item Spec"],
-                            "Images": all_images
-                        })
-                except Exception as e:
-                    st.error(f"Error parsing images: {str(e)}")
-            
-            # Display images in grid
-            for img_row in all_image_rows:
-                st.write(f"**{img_row['Product']}** - {img_row['Item Spec']}")
-                
-                # Calculate number of columns based on image count
-                num_images = len(img_row['Images'])
-                cols_per_row = min(4, num_images)  # Max 4 columns
-                
-                # Create image gallery
-                cols = st.columns(cols_per_row)
-                for i, img_url in enumerate(img_row['Images']):
-                    col_idx = i % cols_per_row
-                    with cols[col_idx]:
-                        st.image(img_url, width=150)
+                    with elements("shopee_gallery_" + str(unique_key)):
+                        from streamlit_elements import mui
+                        import ShopeeOrderImageGallery from './ShopeeOrderImageGallery'
+                        
+                        ShopeeOrderImageGallery(productData=gallery_data)
+                except ImportError:
+                    # Fallback to simpler gallery if streamlit_elements is not available
+                    for product in gallery_data:
+                        st.write(f"**{product['productName']}** - {product['itemSpec']}")
+                        
+                        # Calculate number of columns based on image count
+                        num_images = len(product['images'])
+                        cols_per_row = min(4, num_images)  # Max 4 columns
+                        
+                        # Create image gallery
+                        cols = st.columns(cols_per_row)
+                        for i, img_url in enumerate(product['images']):
+                            col_idx = i % cols_per_row
+                            with cols[col_idx]:
+                                st.image(img_url, width=150)
+            else:
+                st.info("No product images available for this order")
         
         editor_key = f"editor_{unique_key}"
 
