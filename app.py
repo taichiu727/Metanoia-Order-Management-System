@@ -973,8 +973,19 @@ def fetch_and_process_orders(token, db):
                         "Missing": tracking['missing_count'],
                         "Note": tracking['note']
                     })
-        
-        return pd.DataFrame(orders_data)
+        orders_df = pd.DataFrame(orders_data)
+        # Debug: Check if All Images column exists and contains valid data
+        if "All Images" in orders_df.columns:
+            st.write(f"Debug: All Images column exists with {len(orders_df)} rows")
+            # Check a sample to ensure data is properly formatted
+            if not orders_df.empty:
+                sample = orders_df.iloc[0]["All Images"]
+                st.write(f"Debug: Sample All Images data: {sample[:100]}...")
+        else:
+            st.write("Debug: All Images column is missing!")
+        return orders_df
+
+        #return pd.DataFrame(orders_data)
 
 def handle_data_editor_changes(edited_df, db):
     """Handle changes made in the data editor"""
