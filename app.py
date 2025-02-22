@@ -854,7 +854,7 @@ def on_data_change():
         st.error(f"Error saving changes: {str(e)}")
 
 
-
+@st.cache_data
 def fetch_and_process_orders(token, db):
     """Fetch orders and process them into a DataFrame with all product images"""
     with st.spinner("Fetching orders..."):
@@ -2028,7 +2028,7 @@ def get_column_config():
         "Item Spec": st.column_config.TextColumn("Item Spec", width="small"),
         "Item Number": st.column_config.TextColumn("Item Number", width="small"),
         "Quantity": st.column_config.NumberColumn("Quantity", width="small"),
-        "Image": st.column_config.ImageColumn("Primary Image", width="small", lazy_loading=True),
+        "Image": st.column_config.ImageColumn("Primary Image", width="small"),
         "Reference Image": st.column_config.ImageColumn(
             "Reference Image",
             width="small",
