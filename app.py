@@ -3185,8 +3185,8 @@ def main():
         return
 
     # Use sidebar fragment within sidebar context
-    with st.sidebar:
-        sidebar_controls()
+    #with st.sidebar:
+        #sidebar_controls()
     
     # Main navigation tabs
     main_tabs = st.tabs(["Order Management", "Products", "Settings"])
