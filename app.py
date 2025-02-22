@@ -2028,7 +2028,7 @@ def get_column_config():
         "Item Spec": st.column_config.TextColumn("Item Spec", width="small"),
         "Item Number": st.column_config.TextColumn("Item Number", width="small"),
         "Quantity": st.column_config.NumberColumn("Quantity", width="small"),
-        "Image": st.column_config.ImageColumn("Primary Image", width="small"),
+        "Image": st.column_config.ImageColumn("Primary Image", width="small", lazy_loading=True),
         "Reference Image": st.column_config.ImageColumn(
             "Reference Image",
             width="small",
