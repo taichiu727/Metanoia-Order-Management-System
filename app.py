@@ -2210,37 +2210,7 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
         
         # New section for displaying all product images
         if 'All Images' in order_data.columns:
-            st.subheader("Product Images")
-            all_image_rows = []
-            
-            for idx, row in order_data.iterrows():
-                try:
-                    # Parse the JSON string to get all image URLs
-                    all_images = json.loads(row['All Images']) if isinstance(row['All Images'], str) else []
-                    
-                    if all_images:
-                        all_image_rows.append({
-                            "Product": row["Product"], 
-                            "Item Spec": row["Item Spec"],
-                            "Images": all_images
-                        })
-                except Exception as e:
-                    st.error(f"Error parsing images: {str(e)}")
-            
-            # Display images in grid
-            for img_row in all_image_rows:
-                st.write(f"**{img_row['Product']}** - {img_row['Item Spec']}")
-                
-                # Calculate number of columns based on image count
-                num_images = len(img_row['Images'])
-                cols_per_row = min(4, num_images)  # Max 4 columns
-                
-                # Create image gallery
-                cols = st.columns(cols_per_row)
-                for i, img_url in enumerate(img_row['Images']):
-                    col_idx = i % cols_per_row
-                    with cols[col_idx]:
-                        st.image(img_url, width=150)
+            display_image_gallery(order_data, unique_key)
         
         editor_key = f"editor_{unique_key}"
 
