@@ -2195,7 +2195,7 @@ def display_image_gallery(order_data, unique_key):
     else:
         st.info("No product images available for this order")
 
-#@st.fragment
+@st.fragment
 def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
     all_received = all(order_data['Received'])
     status_emoji = "✅" if all_received else "⚠️" if any(order_data['Received']) else "❌"
@@ -2530,6 +2530,31 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
             disabled=["Order Number", "Created", "Deadline", "Product", 
                      "Item Spec", "Item Number", "Quantity", "Image", "Reference Image"]
         )
+
+        st.write("Product Images:")
+        for idx, row in edited_df.iterrows():
+            product_key = f"{row['Product']}_{row['Item Spec']}"
+            is_visible = st.session_state[view_images_key].get(product_key, False)
+            
+            # Create a button for each product
+            if is_visible:
+                if st.button(f"🖼️ Hide images for {row['Product']} - {row['Item Spec']}", key=f"toggle_{unique_key}_{idx}"):
+                    st.session_state[view_images_key][product_key] = False
+                    st.rerun()
+            else:
+                if st.button(f"🖼️ Show images for {row['Product']} - {row['Item Spec']}", key=f"toggle_{unique_key}_{idx}"):
+                    st.session_state[view_images_key][product_key] = True
+                    st.rerun()
+            
+            # Display gallery if visible
+            if is_visible:
+                try:
+                    all_images = json.loads(row['All Images']) if isinstance(row['All Images'], str) else []
+                    if all_images:
+                        for img_url in all_images[:5]:
+                            st.image(img_url, width=200)
+                except Exception as e:
+                    st.error(f"Error displaying images: {str(e)}")
         
         # Check if View Images checkboxes were clicked
         if ("All Images" in display_data.columns and 
