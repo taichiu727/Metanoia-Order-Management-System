@@ -2061,73 +2061,67 @@ def prepare_gallery_data(order_data):
     return gallery_data
 
 def create_html_gallery(gallery_data):
-    """Create an HTML-based image gallery from gallery data"""
+    """Create a smaller HTML-based image gallery from gallery data"""
     html = """
     <style>
         .gallery-container {
             display: flex;
             flex-wrap: wrap;
-            gap: 1rem;
-            margin-bottom: 1rem;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
         }
         .gallery-item {
             border: 1px solid #ddd;
             border-radius: 4px;
             overflow: hidden;
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            width: calc(50% - 0.5rem);
-            margin-bottom: 1rem;
+            width: 100%;
+            margin-bottom: 0.5rem;
         }
         .gallery-header {
-            padding: 0.5rem;
+            padding: 0.25rem;
             background-color: #f0f7ff;
             border-bottom: 1px solid #ddd;
         }
         .gallery-title {
             margin: 0;
-            font-size: 1rem;
+            font-size: 0.9rem;
             font-weight: 500;
         }
         .gallery-subtitle {
             margin: 0;
-            font-size: 0.8rem;
+            font-size: 0.7rem;
             color: #666;
         }
         .main-image-container {
             display: flex;
             justify-content: center;
-            padding: 0.5rem;
+            padding: 0.25rem;
             background-color: white;
-            min-height: 200px;
+            min-height: 120px;
             align-items: center;
         }
         .main-image {
-            max-height: 200px;
+            max-height: 120px;
             max-width: 100%;
             object-fit: contain;
         }
         .thumbnails {
             display: flex;
             overflow-x: auto;
-            padding: 0.5rem;
+            padding: 0.25rem;
             background-color: #f9f9f9;
             gap: 0.25rem;
         }
         .thumbnail {
-            width: 50px;
-            height: 50px;
+            width: 30px;
+            height: 30px;
             object-fit: cover;
             border: 1px solid #ddd;
             cursor: pointer;
         }
         .thumbnail.active {
             border: 2px solid #1e88e5;
-        }
-        /* Media query for mobile screens */
-        @media (max-width: 600px) {
-            .gallery-item {
-                width: 100%;
-            }
         }
     </style>
     
@@ -2214,10 +2208,7 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
     if 'reference_images' not in st.session_state:
         st.session_state.reference_images = db.get_product_images()
     
-    # Create a key for storing which products have their images visible
-    view_images_key = f"view_images_{unique_key}"
-    if view_images_key not in st.session_state:
-        st.session_state[view_images_key] = {}
+   
     
     with st.expander(f"Order: {order_num} {status_emoji}", expanded=True):
         # Add shipping controls
@@ -2498,10 +2489,9 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
                          "Item Spec", "Item Number", "Quantity", "Image", 
                          "Reference Image"]
         
-        if "All Images" in display_data.columns:
-            display_columns.append("View Images")
+        
             
-        display_columns.extend(["Received", "Missing", "Note", "Tag"])
+        #display_columns.extend(["Received", "Missing", "Note", "Tag"])
         
         # Keep only the selected columns
         display_data = display_data[display_columns]
@@ -2510,12 +2500,16 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
         column_config = get_column_config()
         
         # Add "View Images" button column if available
-        if "View Images" in display_data.columns:
-            column_config["View Images"] = st.column_config.CheckboxColumn(
-                "View Images",
-                help="Click to view all images for this product",
-                width="small"
-            )
+        if 'All Images' in order_data.columns:
+            st.subheader("Product Images")
+            gallery_data = prepare_gallery_data(order_data)
+            
+            if gallery_data:
+                # Create HTML gallery and render it with a smaller height
+                gallery_html = create_html_gallery(gallery_data)
+                st.components.v1.html(gallery_html, height=200, scrolling=True)
+            else:
+                st.info("No product images available for this order")
         
         # Apply quantity highlighting
         def highlight_quantity(df):
@@ -2542,81 +2536,6 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
                      "Item Spec", "Item Number", "Quantity", "Image", "Reference Image"]
         )
 
-        st.write("Product Images:")
-        for idx, row in edited_df.iterrows():
-            product_key = f"{row['Product']}_{row['Item Spec']}"
-            is_visible = st.session_state[view_images_key].get(product_key, False)
-            
-            # Create a button for each product
-            if is_visible:
-                if st.button(f"🖼️ Hide images for {row['Product']} - {row['Item Spec']}", key=f"toggle_{unique_key}_{idx}"):
-                    st.session_state[view_images_key][product_key] = False
-                    st.rerun()
-            else:
-                if st.button(f"🖼️ Show images for {row['Product']} - {row['Item Spec']}", key=f"toggle_{unique_key}_{idx}"):
-                    st.session_state[view_images_key][product_key] = True
-                    st.rerun()
-            
-            # Display gallery if visible
-            if is_visible:
-                try:
-                    all_images = json.loads(row['All Images']) if isinstance(row['All Images'], str) else []
-                    if all_images:
-                        for img_url in all_images[:5]:
-                            st.image(img_url, width=200)
-                except Exception as e:
-                    st.error(f"Error displaying images: {str(e)}")
-        
-        # Check if View Images checkboxes were clicked
-        if ("All Images" in display_data.columns and 
-            editor_key in st.session_state and 
-            "edited_rows" in st.session_state[editor_key]):
-            
-            for idx_str, changes in st.session_state[editor_key]["edited_rows"].items():
-                if "View Images" in changes:
-                    idx = int(idx_str)
-                    row = edited_df.iloc[idx]
-                    product_key = f"{row['Product']}_{row['Item Spec']}"
-                    
-                    # Update the visibility state for this product
-                    st.session_state[view_images_key][product_key] = changes["View Images"]
-                    
-                    # Force a rerun to show/hide the gallery
-                    st.rerun()
-        
-        # Display individual product galleries based on visibility state
-        if "All Images" in display_data.columns:
-            for idx, row in edited_df.iterrows():
-                product_key = f"{row['Product']}_{row['Item Spec']}"
-                
-                if product_key in st.session_state[view_images_key] and st.session_state[view_images_key][product_key]:
-                    try:
-                        all_images = json.loads(row['All Images']) if isinstance(row['All Images'], str) else []
-                        
-                        if all_images:
-                            # Add a divider to separate the gallery
-                            st.divider()
-                            
-                            # Show product info
-                            st.subheader(f"Images for {row['Product']} - {row['Item Spec']}")
-                            
-                            # Create gallery data for this product only
-                            gallery_data = [{
-                                "productName": row["Product"],
-                                "itemSpec": row["Item Spec"],
-                                "images": all_images
-                            }]
-                            
-                            # Create HTML gallery for this product
-                            gallery_html = create_html_gallery(gallery_data)
-                            st.components.v1.html(gallery_html, height=350, scrolling=True)
-                            
-                            # Add a "Hide Images" button
-                            if st.button("❌ Hide Images", key=f"hide_{unique_key}_{idx}"):
-                                st.session_state[view_images_key][product_key] = False
-                                st.rerun()
-                    except Exception as e:
-                        st.error(f"Error displaying images: {str(e)}")
         
         # Add file uploaders for each unique SKU
         unique_skus = display_data["Item Number"].unique()
