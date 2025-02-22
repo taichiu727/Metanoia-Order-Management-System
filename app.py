@@ -2195,7 +2195,7 @@ def display_image_gallery(order_data, unique_key):
     else:
         st.info("No product images available for this order")
 
-@st.fragment
+#@st.fragment
 def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
     all_received = all(order_data['Received'])
     status_emoji = "✅" if all_received else "⚠️" if any(order_data['Received']) else "❌"
