@@ -2474,15 +2474,7 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
         # Add Reference Image column
         display_data["Reference Image"] = display_data["Item Number"].apply(format_reference_image)
         
-        # Add an "View Images" button column to the DataFrame if All Images column exists
-        if "All Images" in display_data.columns:
-            # Initialize with current state or False if not set
-            display_data["View Images"] = display_data.apply(
-                lambda row: st.session_state[view_images_key].get(
-                    f"{row['Product']}_{row['Item Spec']}", False
-                ),
-                axis=1
-            )
+       
         
         # Select columns for display
         display_columns = ["Order Number", "Created", "Deadline", "Product", 
