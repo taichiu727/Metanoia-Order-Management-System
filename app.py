@@ -922,6 +922,9 @@ def fetch_and_process_orders(token, db):
             if batch_response and "response" in batch_response and "item_list" in batch_response["response"]:
                 for item in batch_response["response"]["item_list"]:
                     item_details[item["item_id"]] = item
+            
+            # Add a small delay to avoid rate limits
+            time.sleep(0.2)
         
         # Process orders into DataFrame with item_spec in the tracking key
         tracking_data = {
@@ -2026,6 +2029,26 @@ def get_column_config():
         "Note": st.column_config.TextColumn("Note", width="medium", default="")
     }
 
+def prepare_gallery_data(order_data):
+    """Prepare product data for the gallery component"""
+    gallery_data = []
+    
+    for idx, row in order_data.iterrows():
+        try:
+            # Parse the JSON string to get all image URLs
+            all_images = json.loads(row['All Images']) if isinstance(row['All Images'], str) else []
+            
+            if all_images:
+                gallery_data.append({
+                    "productName": row["Product"],
+                    "itemSpec": row["Item Spec"],
+                    "images": all_images
+                })
+        except Exception as e:
+            st.error(f"Error parsing images: {str(e)}")
+    
+    return gallery_data
+
 def create_html_gallery(gallery_data):
     """Create an HTML-based image gallery from gallery data"""
     html = """
@@ -2157,26 +2180,13 @@ def create_html_gallery(gallery_data):
     
     return html
 
-# Usage in order_editor
 def display_image_gallery(order_data, unique_key):
     """Display image gallery for order data"""
     if 'All Images' not in order_data.columns:
         return
         
     st.subheader("Product Images")
-    gallery_data = []
-    
-    for idx, row in order_data.iterrows():
-        try:
-            all_images = json.loads(row['All Images']) if isinstance(row['All Images'], str) else []
-            if all_images:
-                gallery_data.append({
-                    "productName": row["Product"],
-                    "itemSpec": row["Item Spec"],
-                    "images": all_images
-                })
-        except Exception as e:
-            st.error(f"Error parsing images: {str(e)}")
+    gallery_data = prepare_gallery_data(order_data)
     
     if gallery_data:
         # Create HTML gallery and render it
@@ -2201,37 +2211,36 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
         # New section for displaying all product images
         if 'All Images' in order_data.columns:
             st.subheader("Product Images")
+            all_image_rows = []
             
-            # Prepare data for the gallery component
-            gallery_data = prepare_gallery_data(order_data)
-            
-            if gallery_data:
-                # Use the React component to display the gallery
-                from streamlit_elements import elements
-                
+            for idx, row in order_data.iterrows():
                 try:
-                    with elements("shopee_gallery_" + str(unique_key)):
-                        from streamlit_elements import mui
-                        import ShopeeOrderImageGallery from './ShopeeOrderImageGallery'
-                        
-                        ShopeeOrderImageGallery(productData=gallery_data)
-                except ImportError:
-                    # Fallback to simpler gallery if streamlit_elements is not available
-                    for product in gallery_data:
-                        st.write(f"**{product['productName']}** - {product['itemSpec']}")
-                        
-                        # Calculate number of columns based on image count
-                        num_images = len(product['images'])
-                        cols_per_row = min(4, num_images)  # Max 4 columns
-                        
-                        # Create image gallery
-                        cols = st.columns(cols_per_row)
-                        for i, img_url in enumerate(product['images']):
-                            col_idx = i % cols_per_row
-                            with cols[col_idx]:
-                                st.image(img_url, width=150)
-            else:
-                st.info("No product images available for this order")
+                    # Parse the JSON string to get all image URLs
+                    all_images = json.loads(row['All Images']) if isinstance(row['All Images'], str) else []
+                    
+                    if all_images:
+                        all_image_rows.append({
+                            "Product": row["Product"], 
+                            "Item Spec": row["Item Spec"],
+                            "Images": all_images
+                        })
+                except Exception as e:
+                    st.error(f"Error parsing images: {str(e)}")
+            
+            # Display images in grid
+            for img_row in all_image_rows:
+                st.write(f"**{img_row['Product']}** - {img_row['Item Spec']}")
+                
+                # Calculate number of columns based on image count
+                num_images = len(img_row['Images'])
+                cols_per_row = min(4, num_images)  # Max 4 columns
+                
+                # Create image gallery
+                cols = st.columns(cols_per_row)
+                for i, img_url in enumerate(img_row['Images']):
+                    col_idx = i % cols_per_row
+                    with cols[col_idx]:
+                        st.image(img_url, width=150)
         
         editor_key = f"editor_{unique_key}"
 
