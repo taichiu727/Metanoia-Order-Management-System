@@ -912,14 +912,18 @@ def fetch_and_process_orders(token, db):
                     if reference_image:
                         reference_image = f"data:image/jpeg;base64,{reference_image}"
                     
-                    # Extract all image URLs (not just the first one)
+                    # FIXED: Extract all image URLs with proper deduplication
                     image_urls = []
-                    if "image_info" in item and "image_url" in item["image_info"]:
-                        # Single image case
-                        image_urls.append(item["image_info"]["image_url"])
-                    elif "image_info" in item and "image_url_list" in item["image_info"]:
-                        # Multiple images case
+                    
+                    # Check for image_url_list first (preferred source of multiple images)
+                    if "image_info" in item and "image_url_list" in item["image_info"] and item["image_info"]["image_url_list"]:
                         image_urls = item["image_info"]["image_url_list"]
+                    # Fallback to single image_url if no list exists
+                    elif "image_info" in item and "image_url" in item["image_info"] and item["image_info"]["image_url"]:
+                        image_urls = [item["image_info"]["image_url"]]
+                    
+                    # Ensure no duplicate images
+                    image_urls = list(dict.fromkeys(image_urls))
                     
                     # Store all images as a JSON string
                     all_images_json = json.dumps(image_urls) if image_urls else ""
@@ -933,8 +937,8 @@ def fetch_and_process_orders(token, db):
                         "Deadline": datetime.fromtimestamp(order_detail["ship_by_date"]).strftime("%Y-%m-%d %H:%M"),
                         "Product": item["item_name"],
                         "Quantity": item["model_quantity_purchased"],
-                        "Image": primary_image,  # Keep first image for compatibility
-                        "All Images": all_images_json,  # Store all images as JSON
+                        "Image": primary_image,
+                        "All Images": all_images_json,
                         "Reference Image": reference_image,
                         "Item Spec": item["model_name"],
                         "Item Number": item["item_sku"],
@@ -2274,13 +2278,50 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
                 if all_images_json:
                     image_urls = json.loads(all_images_json)
                     
-                    if image_urls and len(image_urls) > 1:
-                        st.write("Product Images:")
-                        image_cols = st.columns(min(len(image_urls), 4))  # Show up to 4 images in a row
+                    if image_urls and len(image_urls) > 1:  # Only show gallery if multiple images
+                        st.markdown("### Product Images")
+                        # Add CSS for better image display with hover zoom
+                        st.markdown("""
+                        <style>
+                            .image-gallery {
+                                display: flex;
+                                flex-wrap: wrap;
+                                gap: 10px;
+                                margin-bottom: 15px;
+                            }
+                            .image-container {
+                                border: 1px solid #ddd;
+                                border-radius: 4px;
+                                padding: 5px;
+                                transition: transform 0.2s;
+                            }
+                            .image-container:hover {
+                                transform: scale(1.05);
+                                box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+                            }
+                            .product-image {
+                                width: 120px;
+                                height: 120px;
+                                object-fit: contain;
+                            }
+                        </style>
+                        """, unsafe_allow_html=True)
                         
-                        for i, url in enumerate(image_urls):
-                            with image_cols[i % 4]:
-                                st.image(url, width=100)
+                        # Create a flex container for images
+                        gallery_html = '<div class="image-gallery">'
+                        
+                        for url in image_urls:
+                            gallery_html += f"""
+                            <div class="image-container">
+                                <img src="{url}" class="product-image" 
+                                    alt="Product image" 
+                                    onclick="window.open('{url}', '_blank')" 
+                                    title="Click to view full size" />
+                            </div>
+                            """
+                        
+                        gallery_html += '</div>'
+                        st.markdown(gallery_html, unsafe_allow_html=True)
             except Exception as e:
                 st.error(f"Error displaying product images: {str(e)}")
         
