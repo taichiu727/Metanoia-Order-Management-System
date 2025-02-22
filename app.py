@@ -2203,19 +2203,19 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
     if 'reference_images' not in st.session_state:
         st.session_state.reference_images = db.get_product_images()
     
+    # Create a key for storing which products have their images visible
+    view_images_key = f"view_images_{unique_key}"
+    if view_images_key not in st.session_state:
+        st.session_state[view_images_key] = {}
+    
     with st.expander(f"Order: {order_num} {status_emoji}", expanded=True):
         # Add shipping controls
         col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
-        # [Shipping button code remains the same...]
+        # Your existing shipping buttons code here
         
-        # New section for displaying all product images
-        if 'All Images' in order_data.columns:
-            display_image_gallery(order_data, unique_key)
-        
-        editor_key = f"editor_{unique_key}"
-
-        # Add Reference Images to display data
+        # Reference image and data editor section
         display_data = order_data.copy()
+        
         # Format reference images with data URL
         def format_reference_image(sku):
             if sku in st.session_state.reference_images and st.session_state.reference_images[sku]:
@@ -2226,34 +2226,94 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
         # Add Reference Image column
         display_data["Reference Image"] = display_data["Item Number"].apply(format_reference_image)
         
-        # Select which columns to display
-        display_columns = ["Order Number", "Created", "Deadline", "Product", 
-                          "Item Spec", "Item Number", "Quantity", "Image", 
-                          "Reference Image", "Received", "Missing", "Note", "Tag"]
+        # Add an "All Images" button column to the DataFrame if All Images column exists
+        if "All Images" in display_data.columns:
+            display_data["View All Images"] = False
         
+        # Select columns for display
+        display_columns = ["Order Number", "Created", "Deadline", "Product", 
+                         "Item Spec", "Item Number", "Quantity", "Image", 
+                         "Reference Image"]
+        
+        if "All Images" in display_data.columns:
+            display_columns.append("View All Images")
+            
+        display_columns.extend(["Received", "Missing", "Note", "Tag"])
+        
+        # Keep only the selected columns
         display_data = display_data[display_columns]
         
-        def highlight_quantity(df):
-            """
-            Highlight cells with quantity > 1 in yellow
-            """
-            def color_quantity(val):
-                return 'background-color: yellow' if val > 1 else ''
-            
-            return df.style.map(color_quantity, subset=['Quantity'])
-
-        # In your order_editor function, modify the data editor creation
-        display_data_styled = highlight_quantity(display_data)
-       
+        # Configure column display
+        column_config = get_column_config()
+        
+        # Add "View All Images" button column if available
+        if "View All Images" in display_data.columns:
+            column_config["View All Images"] = st.column_config.CheckboxColumn(
+                "View Images",
+                help="Click to view all images for this product",
+                width="small"
+            )
+        
+        # Display the data editor
+        editor_key = f"editor_{unique_key}"
         edited_df = st.data_editor(
-            display_data_styled,
-            column_config=get_column_config(),
+            display_data,
+            column_config=column_config,
             use_container_width=True,
             key=editor_key,
             num_rows="fixed",
             disabled=["Order Number", "Created", "Deadline", "Product", 
                      "Item Spec", "Item Number", "Quantity", "Image"]
         )
+        
+        # Check if View All Images checkboxes were clicked
+        if ("All Images" in display_data.columns and 
+            editor_key in st.session_state and 
+            "edited_rows" in st.session_state[editor_key]):
+            
+            for idx_str, changes in st.session_state[editor_key]["edited_rows"].items():
+                if "View All Images" in changes:
+                    idx = int(idx_str)
+                    row = edited_df.iloc[idx]
+                    product_key = f"{row['Product']}_{row['Item Spec']}"
+                    
+                    # Update the visibility state for this product
+                    st.session_state[view_images_key][product_key] = changes["View All Images"]
+                    
+                    # Reset the checkbox in the editor
+                    st.session_state[editor_key]["edited_rows"][idx_str]["View All Images"] = False
+        
+        # Display individual product galleries based on visibility state
+        if "All Images" in display_data.columns:
+            for idx, row in edited_df.iterrows():
+                product_key = f"{row['Product']}_{row['Item Spec']}"
+                
+                if product_key in st.session_state[view_images_key] and st.session_state[view_images_key][product_key]:
+                    try:
+                        all_images = json.loads(row['All Images']) if isinstance(row['All Images'], str) else []
+                        
+                        if all_images:
+                            st.subheader(f"Images for {row['Product']} - {row['Item Spec']}")
+                            
+                            # Create a single-product gallery data
+                            gallery_data = [{
+                                "productName": row["Product"],
+                                "itemSpec": row["Item Spec"],
+                                "images": all_images
+                            }]
+                            
+                            # Create HTML gallery and render it
+                            gallery_html = create_html_gallery(gallery_data)
+                            st.components.v1.html(gallery_html, height=350, scrolling=True)
+                            
+                            # Add a "Hide" button
+                            if st.button("❌ Hide Images", key=f"hide_{unique_key}_{idx}"):
+                                st.session_state[view_images_key][product_key] = False
+                                st.rerun()
+                    except Exception as e:
+                        st.error(f"Error displaying images: {str(e)}")
+        
+
         
         # Add file uploaders for each unique SKU
         unique_skus = display_data["Item Number"].unique()
