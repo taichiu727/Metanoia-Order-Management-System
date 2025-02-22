@@ -2494,7 +2494,7 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
         
         # Add "View Images" button column if available
         if 'All Images' in order_data.columns:
-            st.subheader("Product Images")
+            #st.subheader("Product Images")
             gallery_data = prepare_gallery_data(order_data)
             
             if gallery_data:
