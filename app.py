@@ -855,7 +855,7 @@ def on_data_change():
 
 
 @st.cache_data
-def fetch_and_process_orders(token, db):
+def fetch_and_process_orders(token, _db):
     """Fetch orders and process them into a DataFrame with all product images"""
     with st.spinner("Fetching orders..."):
         orders_response = get_orders(
