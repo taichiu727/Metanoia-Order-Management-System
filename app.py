@@ -964,7 +964,7 @@ def fetch_and_process_orders(token, db):
                         "Deadline": datetime.fromtimestamp(order_detail["ship_by_date"]).strftime("%Y-%m-%d %H:%M"),
                         "Product": item["item_name"],
                         "Quantity": item["model_quantity_purchased"],
-                        #"Image": item["image_info"]["image_url"],  # Primary image
+                        "Image": item["image_info"]["image_url"],  # Primary image
                         "All Images": all_images_str,  # Store all images as JSON string
                         "Reference Image": reference_image,
                         "Item Spec": item["model_name"],
