@@ -2061,7 +2061,7 @@ def prepare_gallery_data(order_data):
     return gallery_data
 
 def create_html_gallery(gallery_data):
-    """Create a smaller HTML-based image gallery from gallery data"""
+    """Create an HTML-based image gallery with lazy loading"""
     html = """
     <style>
         .gallery-container {
@@ -2145,7 +2145,7 @@ def create_html_gallery(gallery_data):
                 <p class="gallery-subtitle">{item_spec}</p>
             </div>
             <div class="main-image-container">
-                <img id="{image_id_prefix}_main" src="{images[0]}" class="main-image" alt="{product_name}">
+                <img id="{image_id_prefix}_main" src="{images[0]}" class="main-image" alt="{product_name}" loading="lazy">
             </div>
             <div class="thumbnails">
         """
@@ -2157,7 +2157,8 @@ def create_html_gallery(gallery_data):
                     src="{img_url}" 
                     class="thumbnail {active_class}" 
                     onclick="updateMainImage('{image_id_prefix}_main', '{img_url}', this)"
-                    alt="Thumbnail {j+1}">
+                    alt="Thumbnail {j+1}"
+                    loading="lazy">
             """
             
         html += """
