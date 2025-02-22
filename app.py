@@ -2211,8 +2211,254 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
     with st.expander(f"Order: {order_num} {status_emoji}", expanded=True):
         # Add shipping controls
         col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
-        # Your existing shipping buttons code here
-        
+        with col2:
+            if st.button("出貨 🚚", key=f"ship_{unique_key}"):
+                token = check_token_validity(db)
+                if token:
+                    # Ship the order
+                    st.info("Step 1/3: Shipping order...")
+                    shipping_response = ship_order(
+                        access_token=token["access_token"],
+                        client_id=CLIENT_ID,
+                        client_secret=CLIENT_SECRET,
+                        shop_id=SHOP_ID,
+                        order_sn=order_num
+                    )
+                    
+                    if shipping_response:
+                        # Get tracking number
+                        st.info("Step 2/3: Getting tracking number...")
+                        tracking_number = None
+                        max_attempts = 3
+                        for attempt in range(max_attempts):
+                            tracking_data = get_tracking_number(
+                                access_token=token["access_token"],
+                                client_id=CLIENT_ID,
+                                client_secret=CLIENT_SECRET,
+                                shop_id=SHOP_ID,
+                                order_sn=order_num
+                            )
+                            if tracking_data and tracking_data.get("response", {}).get("tracking_number"):
+                                tracking_number = tracking_data["response"]["tracking_number"]
+                                st.success(f"Got tracking number: {tracking_number}")
+                                break
+                            if attempt < max_attempts - 1:
+                                st.warning(f"Retrying... ({attempt + 1}/{max_attempts})")
+                                time.sleep(5)
+                        
+                        # Create shipping document with tracking number
+                        st.info("Step 3/3: Creating shipping document...")
+                        doc_request = {
+                            'order_list': [{
+                                'order_sn': order_num,
+                                'tracking_number': tracking_number
+                            }],
+                            'shop_id': SHOP_ID
+                        }
+                        
+                        doc_response = create_shipping_document(
+                            access_token=token["access_token"],
+                            client_id=CLIENT_ID,
+                            client_secret=CLIENT_SECRET,
+                            shop_id=SHOP_ID,
+                            order_sn=order_num,
+                            request_body=doc_request
+                        )
+                        
+                        if doc_response and ("error" not in doc_response or doc_response.get("error") == ""):
+                            download_response = download_shipping_document(
+                                access_token=token["access_token"],
+                                client_id=CLIENT_ID,
+                                client_secret=CLIENT_SECRET,
+                                shop_id=SHOP_ID,
+                                order_sn=order_num
+                            )
+                            
+                            if download_response and "response" in download_response:
+                                response_type = download_response["response"].get("type")
+                                
+                                if response_type == "html":
+                                    html_content = download_response["response"]["content"]
+                                    html_content = html_content.replace(
+                                        '<form method="post"',
+                                        '<form method="post" target="_blank"'
+                                    )
+                                    html_content = html_content.replace(
+                                        '</form>',
+                                        '</form><script>document.getElementById("form").submit();</script>'
+                                    )
+                                    st.components.v1.html(html_content, height=0)
+                                    st.success("Shipping document should open automatically")
+                                elif response_type == "pdf":
+                                    pdf_data = download_response["response"]["content"]
+                                    html_content = f"""
+                                    <html><body><script>
+                                        var pdfData = "{pdf_data}";
+                                        var byteCharacters = atob(pdfData);
+                                        var byteNumbers = new Array(byteCharacters.length);
+                                        for (var i = 0; i < byteCharacters.length; i++) {{
+                                            byteNumbers[i] = byteCharacters.charCodeAt(i);
+                                        }}
+                                        var byteArray = new Uint8Array(byteNumbers);
+                                        var file = new Blob([byteArray], {{ type: 'application/pdf' }});
+                                        var fileURL = URL.createObjectURL(file);
+                                        window.open(fileURL, '_blank');
+                                    </script></body></html>
+                                    """
+                                    st.components.v1.html(html_content, height=0)
+                                    st.success("PDF should open in new tab")
+                                else:
+                                    st.error("Unsupported document type")
+                            else:
+                                st.error("Failed to download shipping document")
+                        else:
+                            st.error("Failed to create shipping document")
+                else:
+                    st.error("Invalid token. Please re-authenticate.")
+
+        with col3:
+            if st.button("出貨號碼 🚛", key=f"ship_tracking_{unique_key}"):
+                token = check_token_validity(db)
+                if token:
+                    # Ship the order
+                    with st.spinner("Shipping order..."):
+                        shipping_response = ship_order(
+                            access_token=token["access_token"],
+                            client_id=CLIENT_ID,
+                            client_secret=CLIENT_SECRET,
+                            shop_id=SHOP_ID,
+                            order_sn=order_num
+                        )
+                        
+                        if shipping_response:
+                            # Get tracking number only
+                            with st.spinner("Getting tracking number..."):
+                                tracking_number = None
+                                max_attempts = 3
+                                for attempt in range(max_attempts):
+                                    tracking_data = get_tracking_number(
+                                        access_token=token["access_token"],
+                                        client_id=CLIENT_ID,
+                                        client_secret=CLIENT_SECRET,
+                                        shop_id=SHOP_ID,
+                                        order_sn=order_num
+                                    )
+                                    if tracking_data and tracking_data.get("response", {}).get("tracking_number"):
+                                        tracking_number = tracking_data["response"]["tracking_number"]
+                                        st.success(f"Order shipped! 📦\nTracking number: {tracking_number}")
+                                        break
+                                    if attempt < max_attempts - 1:
+                                        time.sleep(5)
+                                
+                                if not tracking_number:
+                                    st.warning("Order shipped but couldn't retrieve tracking number.")
+                        else:
+                            st.error("Failed to ship order.")
+                else:
+                    st.error("Invalid token. Please re-authenticate.")
+
+        with col4:
+            if st.button("列印 🖨️", key=f"print_{unique_key}"):
+                token = check_token_validity(db)
+                if token:
+                    # Get tracking number first
+                    st.info("Getting tracking number...")
+                    tracking_number = None
+                    max_attempts = 3
+                    for attempt in range(max_attempts):
+                        tracking_data = get_tracking_number(
+                            access_token=token["access_token"],
+                            client_id=CLIENT_ID,
+                            client_secret=CLIENT_SECRET,
+                            shop_id=SHOP_ID,
+                            order_sn=order_num
+                        )
+                        if tracking_data and tracking_data.get("response", {}).get("tracking_number"):
+                            tracking_number = tracking_data["response"]["tracking_number"]
+                            st.success(f"Got tracking number: {tracking_number}")
+                            break
+                        if attempt < max_attempts - 1:
+                            st.warning(f"Retrying... ({attempt + 1}/{max_attempts})")
+                            time.sleep(5)
+                    
+                    # Create shipping document with tracking number
+                    st.info("Creating shipping document...")
+                    doc_request = {
+                        'order_list': [{
+                            'order_sn': order_num,
+                            'tracking_number': tracking_number
+                        }],
+                        'shop_id': SHOP_ID
+                    }
+                    
+                    doc_response = create_shipping_document(
+                        access_token=token["access_token"],
+                        client_id=CLIENT_ID,
+                        client_secret=CLIENT_SECRET,
+                        shop_id=SHOP_ID,
+                        order_sn=order_num,
+                        request_body=doc_request
+                    )
+                    
+                    if doc_response and ("error" not in doc_response or doc_response.get("error") == ""):
+                        download_response = download_shipping_document(
+                            access_token=token["access_token"],
+                            client_id=CLIENT_ID,
+                            client_secret=CLIENT_SECRET,
+                            shop_id=SHOP_ID,
+                            order_sn=order_num
+                        )
+                        
+                        if download_response and "response" in download_response:
+                            response_type = download_response["response"].get("type")
+                            
+                            if response_type == "html":
+                                html_content = download_response["response"]["content"]
+                                html_content = html_content.replace(
+                                    '<form method="post"',
+                                    '<form method="post" target="_blank"'
+                                )
+                                html_content = html_content.replace(
+                                    '</form>',
+                                    '</form><script>document.getElementById("form").submit();</script>'
+                                )
+                                st.components.v1.html(html_content, height=0)
+                                st.success("Shipping document should open automatically")
+                            elif response_type == "pdf":
+                                pdf_data = download_response["response"]["content"]
+                                html_content = f"""
+                                <html><body><script>
+                                    var pdfData = "{pdf_data}";
+                                    var byteCharacters = atob(pdfData);
+                                    var byteNumbers = new Array(byteCharacters.length);
+                                    for (var i = 0; i < byteCharacters.length; i++) {{
+                                        byteNumbers[i] = byteCharacters.charCodeAt(i);
+                                    }}
+                                    var byteArray = new Uint8Array(byteNumbers);
+                                    var file = new Blob([byteArray], {{ type: 'application/pdf' }});
+                                    var fileURL = URL.createObjectURL(file);
+                                    window.open(fileURL, '_blank');
+                                </script></body></html>
+                                """
+                                st.components.v1.html(html_content, height=0)
+                                st.success("PDF should open in new tab")
+                            else:
+                                doc_url = download_response["response"].get("shipping_document_url")
+                                if doc_url:
+                                    st.components.v1.html(
+                                        f'<script>window.open("{doc_url}", "_blank");</script>',
+                                        height=0
+                                    )
+                                    st.success("Shipping document opened in new tab!")
+                                else:
+                                    st.error("No shipping document URL found")
+                        else:
+                            st.error("Failed to download shipping document")
+                    else:
+                        st.error("Failed to create shipping document")
+                else:
+                    st.error("Invalid token. Please re-authenticate.")
+
         # Reference image and data editor section
         display_data = order_data.copy()
         
@@ -2226,9 +2472,15 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
         # Add Reference Image column
         display_data["Reference Image"] = display_data["Item Number"].apply(format_reference_image)
         
-        # Add an "All Images" button column to the DataFrame if All Images column exists
+        # Add an "View Images" button column to the DataFrame if All Images column exists
         if "All Images" in display_data.columns:
-            display_data["View All Images"] = False
+            # Initialize with current state or False if not set
+            display_data["View Images"] = display_data.apply(
+                lambda row: st.session_state[view_images_key].get(
+                    f"{row['Product']}_{row['Item Spec']}", False
+                ),
+                axis=1
+            )
         
         # Select columns for display
         display_columns = ["Order Number", "Created", "Deadline", "Product", 
@@ -2236,7 +2488,7 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
                          "Reference Image"]
         
         if "All Images" in display_data.columns:
-            display_columns.append("View All Images")
+            display_columns.append("View Images")
             
         display_columns.extend(["Received", "Missing", "Note", "Tag"])
         
@@ -2246,42 +2498,55 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
         # Configure column display
         column_config = get_column_config()
         
-        # Add "View All Images" button column if available
-        if "View All Images" in display_data.columns:
-            column_config["View All Images"] = st.column_config.CheckboxColumn(
+        # Add "View Images" button column if available
+        if "View Images" in display_data.columns:
+            column_config["View Images"] = st.column_config.CheckboxColumn(
                 "View Images",
                 help="Click to view all images for this product",
                 width="small"
             )
         
+        # Apply quantity highlighting
+        def highlight_quantity(df):
+            """
+            Highlight cells with quantity > 1 in yellow
+            """
+            def color_quantity(val):
+                return 'background-color: yellow' if val > 1 else ''
+            
+            return df.style.map(color_quantity, subset=['Quantity'])
+        
+        # Style the data
+        display_data_styled = highlight_quantity(display_data)
+        
         # Display the data editor
         editor_key = f"editor_{unique_key}"
         edited_df = st.data_editor(
-            display_data,
+            display_data_styled,
             column_config=column_config,
             use_container_width=True,
             key=editor_key,
             num_rows="fixed",
             disabled=["Order Number", "Created", "Deadline", "Product", 
-                     "Item Spec", "Item Number", "Quantity", "Image"]
+                     "Item Spec", "Item Number", "Quantity", "Image", "Reference Image"]
         )
         
-        # Check if View All Images checkboxes were clicked
+        # Check if View Images checkboxes were clicked
         if ("All Images" in display_data.columns and 
             editor_key in st.session_state and 
             "edited_rows" in st.session_state[editor_key]):
             
             for idx_str, changes in st.session_state[editor_key]["edited_rows"].items():
-                if "View All Images" in changes:
+                if "View Images" in changes:
                     idx = int(idx_str)
                     row = edited_df.iloc[idx]
                     product_key = f"{row['Product']}_{row['Item Spec']}"
                     
                     # Update the visibility state for this product
-                    st.session_state[view_images_key][product_key] = changes["View All Images"]
+                    st.session_state[view_images_key][product_key] = changes["View Images"]
                     
-                    # Reset the checkbox in the editor
-                    st.session_state[editor_key]["edited_rows"][idx_str]["View All Images"] = False
+                    # Force a rerun to show/hide the gallery
+                    st.rerun()
         
         # Display individual product galleries based on visibility state
         if "All Images" in display_data.columns:
@@ -2293,27 +2558,29 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
                         all_images = json.loads(row['All Images']) if isinstance(row['All Images'], str) else []
                         
                         if all_images:
+                            # Add a divider to separate the gallery
+                            st.divider()
+                            
+                            # Show product info
                             st.subheader(f"Images for {row['Product']} - {row['Item Spec']}")
                             
-                            # Create a single-product gallery data
+                            # Create gallery data for this product only
                             gallery_data = [{
                                 "productName": row["Product"],
                                 "itemSpec": row["Item Spec"],
                                 "images": all_images
                             }]
                             
-                            # Create HTML gallery and render it
+                            # Create HTML gallery for this product
                             gallery_html = create_html_gallery(gallery_data)
                             st.components.v1.html(gallery_html, height=350, scrolling=True)
                             
-                            # Add a "Hide" button
+                            # Add a "Hide Images" button
                             if st.button("❌ Hide Images", key=f"hide_{unique_key}_{idx}"):
                                 st.session_state[view_images_key][product_key] = False
                                 st.rerun()
                     except Exception as e:
                         st.error(f"Error displaying images: {str(e)}")
-        
-
         
         # Add file uploaders for each unique SKU
         unique_skus = display_data["Item Number"].unique()
@@ -2363,6 +2630,7 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
                         # Show success message
                         st.success(f"Image updated for {sku}")
         
+        # Handle editor changes for Received, Missing, Note, and Tag fields
         if editor_key in st.session_state and "edited_rows" in st.session_state[editor_key]:
             edited_rows = st.session_state[editor_key]["edited_rows"]
             if edited_rows:
