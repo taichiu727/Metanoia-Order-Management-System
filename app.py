@@ -856,7 +856,7 @@ def on_data_change():
 
 
 def fetch_and_process_orders(token, db):
-    """Fetch orders and process them into a DataFrame"""
+    """Fetch orders and process them into a DataFrame with multiple product images"""
     with st.spinner("Fetching orders..."):
         orders_response = get_orders(
             access_token=token["access_token"],
@@ -890,7 +890,7 @@ def fetch_and_process_orders(token, db):
         order_details_list.sort(key=lambda x: x['create_time'], reverse=True)
         st.session_state.order_details = order_details_list
 
-         # Load reference images
+        # Load reference images
         reference_images = db.get_product_images()
 
         # Process orders into DataFrame with item_spec in the tracking key
@@ -911,13 +911,30 @@ def fetch_and_process_orders(token, db):
                     reference_image = reference_images.get(item_sku, "")
                     if reference_image:
                         reference_image = f"data:image/jpeg;base64,{reference_image}"
+                    
+                    # Extract all image URLs (not just the first one)
+                    image_urls = []
+                    if "image_info" in item and "image_url" in item["image_info"]:
+                        # Single image case
+                        image_urls.append(item["image_info"]["image_url"])
+                    elif "image_info" in item and "image_url_list" in item["image_info"]:
+                        # Multiple images case
+                        image_urls = item["image_info"]["image_url_list"]
+                    
+                    # Store all images as a JSON string
+                    all_images_json = json.dumps(image_urls) if image_urls else ""
+                    
+                    # Keep the first image for backward compatibility
+                    primary_image = image_urls[0] if image_urls else ""
+                    
                     orders_data.append({
                         "Order Number": order_detail["order_sn"],
                         "Created": datetime.fromtimestamp(order_detail["create_time"]).strftime("%Y-%m-%d %H:%M"),
                         "Deadline": datetime.fromtimestamp(order_detail["ship_by_date"]).strftime("%Y-%m-%d %H:%M"),
                         "Product": item["item_name"],
                         "Quantity": item["model_quantity_purchased"],
-                        "Image": item["image_info"]["image_url"],
+                        "Image": primary_image,  # Keep first image for compatibility
+                        "All Images": all_images_json,  # Store all images as JSON
                         "Reference Image": reference_image,
                         "Item Spec": item["model_name"],
                         "Item Number": item["item_sku"],
@@ -1969,7 +1986,7 @@ def get_column_config():
         "Item Spec": st.column_config.TextColumn("Item Spec", width="small"),
         "Item Number": st.column_config.TextColumn("Item Number", width="small"),
         "Quantity": st.column_config.NumberColumn("Quantity", width="small"),
-        "Image": st.column_config.ImageColumn("Image", width="small"),
+        "Image": st.column_config.ImageColumn("Main Image", width="small"),
         "Reference Image": st.column_config.ImageColumn(
             "Reference Image",
             width="small",
@@ -2097,6 +2114,7 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
                 else:
                     st.error("Invalid token. Please re-authenticate.")
 
+        # [Rest of shipping controls code]
         with col3:
             if st.button("出貨號碼 🚛", key=f"ship_tracking_{unique_key}"):
                 token = check_token_validity(db)
@@ -2247,9 +2265,28 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
                         st.error("Failed to create shipping document")
                 else:
                     st.error("Invalid token. Please re-authenticate.")
-
+        
+        # Display all product images in a gallery
+        if 'All Images' in order_data.columns and not order_data['All Images'].empty:
+            try:
+                # Get the first row's images (should be the same for all items in the same order)
+                all_images_json = order_data['All Images'].iloc[0]
+                if all_images_json:
+                    image_urls = json.loads(all_images_json)
+                    
+                    if image_urls and len(image_urls) > 1:
+                        st.write("Product Images:")
+                        image_cols = st.columns(min(len(image_urls), 4))  # Show up to 4 images in a row
+                        
+                        for i, url in enumerate(image_urls):
+                            with image_cols[i % 4]:
+                                st.image(url, width=100)
+            except Exception as e:
+                st.error(f"Error displaying product images: {str(e)}")
+        
         editor_key = f"editor_{unique_key}"
 
+        # [Rest of the existing code for data editor and file uploaders]
         # Add Reference Images to display data
         display_data = order_data.copy()
         # Format reference images with data URL
@@ -2261,6 +2298,10 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
 
         # Add Reference Image column
         display_data["Reference Image"] = display_data["Item Number"].apply(format_reference_image)
+        
+        # Remove the "All Images" column before displaying in the editor
+        if "All Images" in display_data.columns:
+            display_data = display_data.drop(columns=["All Images"])
         
         display_data = display_data[["Order Number", "Created", "Deadline", "Product", 
                                    "Item Spec", "Item Number", "Quantity", "Image", 
