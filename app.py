@@ -2040,28 +2040,8 @@ def get_column_config():
         "Note": st.column_config.TextColumn("Note", width="medium", default="")
     }
 
-def prepare_gallery_data(order_data):
-    """Prepare product data for the gallery component"""
-    gallery_data = []
-    
-    for idx, row in order_data.iterrows():
-        try:
-            # Parse the JSON string to get all image URLs
-            all_images = json.loads(row['All Images']) if isinstance(row['All Images'], str) else []
-            
-            if all_images:
-                gallery_data.append({
-                    "productName": row["Product"],
-                    "itemSpec": row["Item Spec"],
-                    "images": all_images
-                })
-        except Exception as e:
-            st.error(f"Error parsing images: {str(e)}")
-    
-    return gallery_data
-
 def create_html_gallery(gallery_data):
-    """Create an HTML-based image gallery with lazy loading"""
+    """Create an HTML-based image gallery with improved lazy loading for Streamlit"""
     html = """
     <style>
         .gallery-container {
@@ -2105,6 +2085,11 @@ def create_html_gallery(gallery_data):
             max-height: 120px;
             max-width: 100%;
             object-fit: contain;
+            opacity: 0;
+            transition: opacity 0.3s ease-in-out;
+        }
+        .main-image.loaded {
+            opacity: 1;
         }
         .thumbnails {
             display: flex;
@@ -2119,9 +2104,15 @@ def create_html_gallery(gallery_data):
             object-fit: cover;
             border: 1px solid #ddd;
             cursor: pointer;
+            opacity: 0.6;
+            transition: opacity 0.3s ease-in-out;
+        }
+        .thumbnail:hover {
+            opacity: 0.8;
         }
         .thumbnail.active {
             border: 2px solid #1e88e5;
+            opacity: 1;
         }
     </style>
     
@@ -2145,7 +2136,11 @@ def create_html_gallery(gallery_data):
                 <p class="gallery-subtitle">{item_spec}</p>
             </div>
             <div class="main-image-container">
-                <img id="{image_id_prefix}_main" src="{images[0]}" class="main-image" alt="{product_name}" loading="lazy">
+                <img 
+                    id="{image_id_prefix}_main" 
+                    data-src="{images[0]}" 
+                    class="main-image" 
+                    alt="{product_name}">
             </div>
             <div class="thumbnails">
         """
@@ -2154,11 +2149,10 @@ def create_html_gallery(gallery_data):
             active_class = "active" if j == 0 else ""
             html += f"""
                 <img 
-                    src="{img_url}" 
+                    data-src="{img_url}" 
                     class="thumbnail {active_class}" 
                     onclick="updateMainImage('{image_id_prefix}_main', '{img_url}', this)"
-                    alt="Thumbnail {j+1}"
-                    loading="lazy">
+                    alt="Thumbnail {j+1}">
             """
             
         html += """
@@ -2170,9 +2164,34 @@ def create_html_gallery(gallery_data):
     </div>
     
     <script>
+        function lazyLoadImages() {
+            const mainImages = document.querySelectorAll('.main-image');
+            const thumbnails = document.querySelectorAll('.thumbnail');
+            
+            const imageObserver = new IntersectionObserver((entries, observer) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        const img = entry.target;
+                        img.src = img.dataset.src;
+                        img.onload = () => img.classList.add('loaded');
+                        observer.unobserve(img);
+                    }
+                });
+            }, {
+                rootMargin: '50px 0px',
+                threshold: 0.01
+            });
+            
+            mainImages.forEach(img => imageObserver.observe(img));
+            thumbnails.forEach(img => imageObserver.observe(img));
+        }
+        
         function updateMainImage(mainImageId, newSrc, thumbElement) {
             // Update main image
-            document.getElementById(mainImageId).src = newSrc;
+            const mainImg = document.getElementById(mainImageId);
+            mainImg.classList.remove('loaded');
+            mainImg.src = newSrc;
+            mainImg.onload = () => mainImg.classList.add('loaded');
             
             // Update active state of thumbnails
             const thumbnails = thumbElement.parentNode.querySelectorAll('.thumbnail');
@@ -2181,23 +2200,72 @@ def create_html_gallery(gallery_data):
             });
             thumbElement.classList.add('active');
         }
+        
+        // Lazy load images when the page loads
+        document.addEventListener('DOMContentLoaded', lazyLoadImages);
+        
+        // Use Intersection Observer for lazy loading
+        if ('IntersectionObserver' in window) {
+            lazyLoadImages();
+        } else {
+            // Fallback for browsers without Intersection Observer
+            const mainImages = document.querySelectorAll('.main-image');
+            const thumbnails = document.querySelectorAll('.thumbnail');
+            
+            mainImages.forEach(img => {
+                img.src = img.dataset.src;
+                img.onload = () => img.classList.add('loaded');
+            });
+            
+            thumbnails.forEach(img => {
+                img.src = img.dataset.src;
+            });
+        }
     </script>
     """
     
     return html
 
+def prepare_gallery_data(order_data):
+    """
+    Prepare gallery data from order data.
+    This is a placeholder implementation - you'll need to adjust based on your actual data structure.
+    """
+    gallery_data = []
+    
+    for _, row in order_data.iterrows():
+        # Assuming 'All Images' column contains a list or string of image URLs
+        if pd.notna(row['All Images']):
+            # Split image URLs if it's a string, otherwise use as-is
+            images = row['All Images'].split(',') if isinstance(row['All Images'], str) else row['All Images']
+            
+            gallery_item = {
+                'productName': row.get('Product Name', 'Unnamed Product'),
+                'itemSpec': row.get('Item Specification', ''),
+                'images': images
+            }
+            gallery_data.append(gallery_item)
+    
+    return gallery_data
+
 def display_image_gallery(order_data, unique_key):
     """Display image gallery for order data"""
     if 'All Images' not in order_data.columns:
+        st.info("No image column found in the data")
         return
         
-    #st.subheader("Product Images")
     gallery_data = prepare_gallery_data(order_data)
     
     if gallery_data:
         # Create HTML gallery and render it
         gallery_html = create_html_gallery(gallery_data)
-        st.components.v1.html(gallery_html, height=max(300, len(gallery_data) * 350), scrolling=True)
+        
+        # Use Streamlit's HTML component with dynamic height
+        st.components.v1.html(
+            gallery_html, 
+            height=max(300, len(gallery_data) * 350), 
+            scrolling=True
+        )
     else:
         st.info("No product images available for this order")
 
