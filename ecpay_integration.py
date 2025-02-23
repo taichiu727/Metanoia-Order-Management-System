@@ -304,7 +304,7 @@ class ECPayLogistics:
         }
 
     @staticmethod
-    def print_shipping_document(logistics_id, payment_no, validation_no=None, document_type="UNIMARTC2C", platform_id=None):
+    def print_shipping_document(logistics_id, payment_no, validation_no=None, document_type="UNIMARTC2C"):
         """Generate shipping document for printing in a new tab
         
         Args:
@@ -312,23 +312,18 @@ class ECPayLogistics:
             payment_no (str): Shipping number
             validation_no (str, optional): Validation code (required for 7-ELEVEN)
             document_type (str): "UNIMARTC2C" for 7-ELEVEN or "FAMIC2C" for FamilyMart
-            platform_id (str, optional): Platform ID for ECPay platform integration
         """
         # Prepare parameters
         params = {
             "MerchantID": ECPAY_MERCHANT_ID,
             "AllPayLogisticsID": logistics_id,
-            "CVSPaymentNo": payment_no
+            "CVSPaymentNo": payment_no,
+            "PlatformID": ""  # Required for FamilyMart, empty string for general merchants
         }
         
         # Add validation code for 7-ELEVEN
         if document_type == "UNIMARTC2C" and validation_no:
             params["CVSValidationNo"] = validation_no
-            
-        # Add PlatformID if provided (for FamilyMart integration)
-        if document_type == "FAMIC2C":
-            # For general merchants, explicitly set PlatformID to null
-            params["PlatformID"] = platform_id if platform_id else ""  # or "null" depending on what ECPay expects
         
         # Generate CheckMacValue
         params["CheckMacValue"] = ECPayLogistics.create_check_mac_value(params)
@@ -341,28 +336,72 @@ class ECPayLogistics:
         else:
             return {"error": True, "message": "Unsupported document type"}
         
+        # Debug logging for FamilyMart
+        if document_type == "FAMIC2C":
+            print("FamilyMart Print Debug:")
+            print("URL:", url)
+            print("Parameters:", params)
+        
         # Create HTML with auto-submitting form in a new tab
         form_html = f"""
         <html>
         <head>
             <title>ECPay Shipping Label</title>
+            <script>
+                function submitForm() {{
+                    console.log('Submitting form...');
+                    var form = document.getElementById('ecpayForm');
+                    var newWindow = window.open('', 'ecpayWindow', 'width=800,height=600');
+                    form.target = 'ecpayWindow';
+                    form.submit();
+                    return false;
+                }}
+            </script>
+            <style>
+                .button {{
+                    background-color: #4CAF50;
+                    border: none;
+                    color: white;
+                    padding: 15px 32px;
+                    text-align: center;
+                    text-decoration: none;
+                    display: inline-block;
+                    font-size: 16px;
+                    margin: 4px 2px;
+                    cursor: pointer;
+                    border-radius: 4px;
+                }}
+                .container {{
+                    text-align: center;
+                    padding: 20px;
+                }}
+            </style>
         </head>
-        <body onload="document.getElementById('ecpayForm').submit();">
-            <form id="ecpayForm" method="post" action="{url}" target="_blank">
+        <body>
+            <div class="container">
+                <form id="ecpayForm" method="post" action="{url}" onsubmit="return submitForm();">
         """
         
+        # Add hidden inputs for all parameters
         for key, value in params.items():
-            form_html += f'<input type="hidden" name="{key}" value="{value}">\n'
+            form_html += f'            <input type="hidden" name="{key}" value="{value}">\n'
         
         form_html += """
-            </form>
+                </form>
+                <button onclick="submitForm()" class="button">點擊開啟列印視窗</button>
+                <p>如果視窗沒有自動開啟，請點擊上方按鈕</p>
+                <div id="status"></div>
+            </div>
             <script>
-                // This ensures the form submits immediately and opens in a new tab
-                setTimeout(function() {
-                    document.getElementById('ecpayForm').submit();
-                }, 100);
+                // Auto-submit after a short delay
+                setTimeout(submitForm, 500);
+                
+                // Add error handling
+                window.onerror = function(msg, url, line) {
+                    document.getElementById('status').innerHTML = '發生錯誤: ' + msg;
+                    return false;
+                };
             </script>
-            <p>正在開啟列印視窗，請等待...</p>
         </body>
         </html>
         """
