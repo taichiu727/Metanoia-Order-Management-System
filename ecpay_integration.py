@@ -336,71 +336,21 @@ class ECPayLogistics:
         else:
             return {"error": True, "message": "Unsupported document type"}
         
-        # Debug logging for FamilyMart
-        if document_type == "FAMIC2C":
-            print("FamilyMart Print Debug:")
-            print("URL:", url)
-            print("Parameters:", params)
-        
-        # Create HTML with auto-submitting form in a new tab
+        # Create simpler HTML form that opens in new tab immediately
         form_html = f"""
         <html>
-        <head>
-            <title>ECPay Shipping Label</title>
-            <script>
-                function submitForm() {{
-                    console.log('Submitting form...');
-                    var form = document.getElementById('ecpayForm');
-                    var newWindow = window.open('', 'ecpayWindow', 'width=800,height=600');
-                    form.target = 'ecpayWindow';
-                    form.submit();
-                    return false;
-                }}
-            </script>
-            <style>
-                .button {{
-                    background-color: #4CAF50;
-                    border: none;
-                    color: white;
-                    padding: 15px 32px;
-                    text-align: center;
-                    text-decoration: none;
-                    display: inline-block;
-                    font-size: 16px;
-                    margin: 4px 2px;
-                    cursor: pointer;
-                    border-radius: 4px;
-                }}
-                .container {{
-                    text-align: center;
-                    padding: 20px;
-                }}
-            </style>
-        </head>
         <body>
-            <div class="container">
-                <form id="ecpayForm" method="post" action="{url}" onsubmit="return submitForm();">
+            <form id="ecpayForm" method="post" action="{url}" target="_blank">
         """
         
         # Add hidden inputs for all parameters
         for key, value in params.items():
-            form_html += f'            <input type="hidden" name="{key}" value="{value}">\n'
+            form_html += f'    <input type="hidden" name="{key}" value="{value}">\n'
         
         form_html += """
-                </form>
-                <button onclick="submitForm()" class="button">點擊開啟列印視窗</button>
-                <p>如果視窗沒有自動開啟，請點擊上方按鈕</p>
-                <div id="status"></div>
-            </div>
+            </form>
             <script>
-                // Auto-submit after a short delay
-                setTimeout(submitForm, 500);
-                
-                // Add error handling
-                window.onerror = function(msg, url, line) {
-                    document.getElementById('status').innerHTML = '發生錯誤: ' + msg;
-                    return false;
-                };
+                document.getElementById('ecpayForm').submit();
             </script>
         </body>
         </html>
