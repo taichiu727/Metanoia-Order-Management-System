@@ -202,12 +202,6 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
         # Always show print button
         if st.button("列印託運單", key=f"print_{order_id}"):
             try:
-                # Add debug logging
-                st.write("Debug: Order Information")
-                st.write(f"Order ID: {order_id}")
-                st.write(f"Platform: {platform}")
-                st.write("Logistics Data:", logistics_data)
-                
                 # Prepare query parameters
                 query_params = {
                     'MerchantTradeNo': f"#{order_id}"
@@ -215,9 +209,6 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                 
                 # Query logistics order
                 query_response = ECPayLogistics.query_logistics_order(**query_params)
-                
-                # Enhanced debug logging for query response
-                st.write("Debug: Query Response:", query_response)
                 
                 # Check query results
                 if query_response.get('error'):
@@ -229,9 +220,8 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                 document_type = "UNIMARTC2C"  # Default to 7-ELEVEN
                 if logistics_data.get('logistics_subtype') == 'FAMIC2C':
                     document_type = "FAMIC2C"
-                    st.write(f"Debug: Using FamilyMart document type")
                 
-                # Print shipping document with correct parameter names
+                # Print shipping document
                 form_html = ECPayLogistics.print_shipping_document(
                     logistics_id=query_response.get('AllPayLogisticsID'),
                     payment_no=query_response.get('CVSPaymentNo'),
@@ -239,13 +229,9 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                     document_type=document_type
                 )
                 
-                # Add debug logging for print parameters
-                st.write("Debug: Print Parameters:", {
-                    'logistics_id': query_response.get('AllPayLogisticsID'),
-                    'payment_no': query_response.get('CVSPaymentNo'),
-                    'document_type': document_type
-                })
-            
+                # Display the form using Streamlit's HTML component
+                st.components.v1.html(form_html, height=500, scrolling=True)
+                
             except Exception as e:
                 st.error(f"列印託運單時發生錯誤: {str(e)}")
                 import traceback
