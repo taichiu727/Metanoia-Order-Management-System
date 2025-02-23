@@ -236,8 +236,7 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                     logistics_id=query_response.get('AllPayLogisticsID'),
                     payment_no=query_response.get('CVSPaymentNo'),
                     validation_no=query_response.get('CVSValidationNo', ''),
-                    document_type=document_type,
-                    platform_id=st.secrets.get("ECPAY_PLATFORM_ID", None)  # Add platform ID if available
+                    document_type=document_type
                 )
                 
                 # Add debug logging for print parameters
