@@ -305,20 +305,12 @@ class ECPayLogistics:
 
     @staticmethod
     def print_shipping_document(logistics_id, payment_no, validation_no=None, document_type="UNIMARTC2C"):
-        """Generate shipping document for printing in a new tab
-        
-        Args:
-            logistics_id (str): ECPay logistics transaction ID
-            payment_no (str): Shipping number
-            validation_no (str, optional): Validation code (required for 7-ELEVEN)
-            document_type (str): "UNIMARTC2C" for 7-ELEVEN or "FAMIC2C" for FamilyMart
-        """
+        """Generate shipping document for printing in a new tab"""
         # Prepare parameters
         params = {
             "MerchantID": ECPAY_MERCHANT_ID,
             "AllPayLogisticsID": logistics_id,
-            "CVSPaymentNo": payment_no,
-            "PlatformID": ""  # Required for FamilyMart, empty string for general merchants
+            "CVSPaymentNo": payment_no
         }
         
         # Add validation code for 7-ELEVEN
@@ -336,25 +328,25 @@ class ECPayLogistics:
         else:
             return {"error": True, "message": "Unsupported document type"}
         
-        # Create simpler HTML form that opens in new tab immediately
-        form_html = f"""
+        # Create HTML with auto-submitting form
+        form_html = f'''
         <html>
         <body>
             <form id="ecpayForm" method="post" action="{url}" target="_blank">
-        """
+    '''
         
         # Add hidden inputs for all parameters
         for key, value in params.items():
             form_html += f'    <input type="hidden" name="{key}" value="{value}">\n'
         
-        form_html += """
+        form_html += '''
             </form>
             <script>
                 document.getElementById('ecpayForm').submit();
             </script>
         </body>
         </html>
-        """
+        '''
         
         return form_html
     
