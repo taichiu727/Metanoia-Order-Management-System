@@ -149,7 +149,21 @@ class ECPayLogistics:
                     "message": f"HTTP error: {status_code}", 
                     "details": content
                 }
-            
+            if params.get("LogisticsSubType") == "FAMIC2C":
+                    st.write("Debug - FamilyMart Order Creation:")
+                    st.write("URL:", url)
+                    st.write("Headers:", headers)
+                    st.write("Request Parameters:", params)
+                    st.write("Response Status:", status_code)
+                    st.write("Response Content-Type:", content_type)
+                    st.write("Response Content:", content)
+
+            if status_code != 200:
+                return {
+                    "error": True, 
+                    "message": f"HTTP error: {status_code}", 
+                    "details": content
+                }
             # Parse response based on content type
             try:
                 # HTML response with key-value pairs
