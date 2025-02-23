@@ -290,7 +290,7 @@ class ECPayLogistics:
         }
 
     @staticmethod
-    def print_shipping_document(logistics_id, payment_no, validation_no=None, document_type="UNIMARTC2C"):
+    def print_shipping_document(logistics_id, payment_no, validation_no=None, document_type="UNIMARTC2C", platform_id=None):
         """Generate shipping document for printing in a new tab
         
         Args:
@@ -298,9 +298,7 @@ class ECPayLogistics:
             payment_no (str): Shipping number
             validation_no (str, optional): Validation code (required for 7-ELEVEN)
             document_type (str): "UNIMARTC2C" for 7-ELEVEN or "FAMIC2C" for FamilyMart
-                
-        Returns:
-            str: HTML content for printing shipping label
+            platform_id (str, optional): Platform ID for ECPay platform integration
         """
         # Prepare parameters
         params = {
@@ -312,6 +310,11 @@ class ECPayLogistics:
         # Add validation code for 7-ELEVEN
         if document_type == "UNIMARTC2C" and validation_no:
             params["CVSValidationNo"] = validation_no
+            
+        # Add PlatformID if provided (for FamilyMart integration)
+        if document_type == "FAMIC2C":
+            # For general merchants, explicitly set PlatformID to null
+            params["PlatformID"] = platform_id if platform_id else ""  # or "null" depending on what ECPay expects
         
         # Generate CheckMacValue
         params["CheckMacValue"] = ECPayLogistics.create_check_mac_value(params)

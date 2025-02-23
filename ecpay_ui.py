@@ -202,7 +202,7 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
         # Always show print button
         if st.button("列印託運單", key=f"print_{order_id}"):
             try:
-                # Debug print of input data
+                # Add debug logging
                 st.write("Debug: Order Information")
                 st.write(f"Order ID: {order_id}")
                 st.write(f"Platform: {platform}")
@@ -216,29 +216,36 @@ def render_ecpay_button(order_id, platform, customer_data, logistics_data, db):
                 # Query logistics order
                 query_response = ECPayLogistics.query_logistics_order(**query_params)
                 
+                # Enhanced debug logging for query response
+                st.write("Debug: Query Response:", query_response)
+                
                 # Check query results
                 if query_response.get('error'):
                     st.error(f"查詢物流單失敗: {query_response.get('message', '未知錯誤')}")
                     st.write("查詢參數:", query_params)
                     return
                 
-                # Determine document type based on store ID
-                store_id = logistics_data.get('store_id', '')
+                # Determine document type based on logistics subtype
                 document_type = "UNIMARTC2C"  # Default to 7-ELEVEN
-                if store_id and store_id.startswith('1'):  # Assuming Family Mart stores start with 1
+                if logistics_data.get('logistics_subtype') == 'FAMIC2C':
                     document_type = "FAMIC2C"
+                    st.write(f"Debug: Using FamilyMart document type")
                 
                 # Print shipping document with correct parameter names
                 form_html = ECPayLogistics.print_shipping_document(
                     logistics_id=query_response.get('AllPayLogisticsID'),
                     payment_no=query_response.get('CVSPaymentNo'),
                     validation_no=query_response.get('CVSValidationNo', ''),
-                    document_type=document_type
+                    document_type=document_type,
+                    platform_id=st.secrets.get("ECPAY_PLATFORM_ID", None)  # Add platform ID if available
                 )
                 
-                # Display the form for auto-submission
-                st.components.v1.html(form_html, height=500, scrolling=True)
-                st.success("正在開啟物流單列印視窗，請等待...")
+                # Add debug logging for print parameters
+                st.write("Debug: Print Parameters:", {
+                    'logistics_id': query_response.get('AllPayLogisticsID'),
+                    'payment_no': query_response.get('CVSPaymentNo'),
+                    'document_type': document_type
+                })
             
             except Exception as e:
                 st.error(f"列印託運單時發生錯誤: {str(e)}")
