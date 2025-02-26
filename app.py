@@ -2077,8 +2077,9 @@ def prepare_gallery_data(order_data):
     
     return gallery_data
 
+@st.cache_data
 def create_html_gallery(gallery_data):
-    """Create an HTML-based image gallery with lazy loading"""
+    """Create an optimized HTML-based image gallery with lazy loading and caching"""
     html = """
     <style>
         .gallery-container {
