@@ -27,12 +27,17 @@ from ecpay_ui import (
     shopee_ecpay_ui, 
     init_ecpay_session
 )
-
+import psycopg2.pool
 
 
 # Database Configuration
 DATABASE_URL = "postgresql://neondb_owner:npg_r9iSFwQd4zAT@ep-white-sky-a1mrgmyd-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require"
 
+def get_db_pool():
+    global db_pool
+    if db_pool is None:
+        db_pool = psycopg2.pool.ThreadedConnectionPool(1, 10, DATABASE_URL)
+    return db_pool
 
 def check_password():
     """Returns `True` if the user had the correct password."""
@@ -85,7 +90,8 @@ class OrderDatabase:
     
     def connect(self):
         try:
-            self.conn = psycopg2.connect(DATABASE_URL)
+            pool = get_db_pool()
+            self.conn = pool.getconn()
             self.cursor = self.conn.cursor(cursor_factory=RealDictCursor)
         except Exception as e:
             st.error(f"Database connection failed: {str(e)}")
@@ -94,8 +100,9 @@ class OrderDatabase:
     def close(self):
         if self.cursor:
             self.cursor.close()
-        if self.conn:
-            self.conn.close()
+        if self.conn and db_pool:
+            db_pool.putconn(self.conn)
+            self.conn = None
 
     def init_tables(self):
         try:
