@@ -2,7 +2,59 @@ import streamlit as st
 import time
 from datetime import datetime
 import json
+import re
 from ecpay_integration import ECPayLogistics, ECPAY_ENV, set_ecpay_credentials
+
+def format_chinese_name(first_name, last_name):
+    """
+    Format name properly based on whether it appears to be a Chinese name
+    For Chinese names: last_name + first_name
+    For non-Chinese names: first_name + last_name
+    
+    Args:
+        first_name (str): First name
+        last_name (str): Last name
+        
+    Returns:
+        str: Formatted name
+    """
+    # Define regex pattern for Chinese characters
+    chinese_pattern = re.compile(r'[\u4e00-\u9fff]')
+    
+    # Check if either name contains Chinese characters
+    if chinese_pattern.search(first_name) or chinese_pattern.search(last_name):
+        # For Chinese names, format as last_name + first_name
+        return f"{last_name}{first_name}".strip()
+    else:
+        # For non-Chinese names, format as first_name + last_name
+        return f"{first_name} {last_name}".strip()
+
+def format_taiwan_phone(phone):
+    """
+    Format Taiwan phone number by removing country code if present
+    and ensuring it starts with '0'
+    
+    Args:
+        phone (str): Original phone number
+        
+    Returns:
+        str: Formatted phone number
+    """
+    if not phone:
+        return ''
+        
+    # Remove any non-numeric characters
+    clean_phone = re.sub(r'\D', '', phone)
+    
+    # If phone starts with Taiwan country code (886), replace with 0
+    if clean_phone.startswith('886'):
+        clean_phone = '0' + clean_phone[3:]
+    
+    # If phone doesn't start with 0, add it
+    if not clean_phone.startswith('0') and len(clean_phone) == 9:
+        clean_phone = '0' + clean_phone
+        
+    return clean_phone
 
 def settings_ui(db):
     """ECPay settings UI component with fixed sender information"""
@@ -60,26 +112,6 @@ def settings_ui(db):
     else:
         st.error("未找到 ECPay 憑證，請檢查 Streamlit 密鑰設定")
 
-
-def truncate_goods_name(goods_name):
-    """
-    Truncate goods name to maximum 25 characters
-    
-    Args:
-        goods_name (str): Original goods name
-    
-    Returns:
-        str: Truncated goods name
-    """
-    # Remove any special characters
-    import re
-    cleaned_name = re.sub(r'[^\w\s\u4e00-\u9fff,.]', '', goods_name)
-    
-    # Truncate to 25 characters
-    if len(cleaned_name) > 25:
-        return cleaned_name[:22] + "..."
-    
-    return cleaned_name
 
 def truncate_goods_name(goods_name):
     """
@@ -304,12 +336,16 @@ def shopify_ecpay_ui(order, db):
     with st.container():
         st.subheader("綠界物流設定")
         
-        # Get customer info
-        customer_name = f"{order.get('customer', {}).get('first_name', '')} {order.get('customer', {}).get('last_name', '')}".strip()
+        # Get customer info - Format Chinese names correctly
+        first_name = order.get('customer', {}).get('first_name', '')
+        last_name = order.get('customer', {}).get('last_name', '')
+        customer_name = format_chinese_name(first_name, last_name)
         
         # Get shipping address and phone
         shipping_address = order.get('shipping_address', {})
         phone = shipping_address.get('phone', '')
+        # Format phone number (remove country code if present)
+        phone = format_taiwan_phone(phone)
         
         # Calculate order total
         total_amount = int(float(order.get('total_price', '0')))
@@ -448,6 +484,8 @@ def shopee_ecpay_ui(order, db):
         # Extract receiver info and items
         receiver_name = order.get("recipient_address", {}).get("name", "")
         receiver_phone = order.get("recipient_address", {}).get("phone", "")
+        # Format phone number (remove country code if present)
+        receiver_phone = format_taiwan_phone(receiver_phone)
         
         # Calculate order total
         total_amount = int(float(order.get("total_amount", 0)) / 100000)  # Convert Shopee amount format
@@ -490,7 +528,14 @@ def shopee_ecpay_ui(order, db):
         for item in order.get("item_list", []):
             items.append(f"{item['item_name']} x {item['model_quantity_purchased']}")
         
-        items_desc = order.get('line_items', [])[0]['title'] if order.get('line_items') else '商品'
+        items_desc = ''
+        if order.get('line_items'):
+            items_desc = order.get('line_items', [])[0]['title']
+        elif items:
+            items_desc = items[0]
+        else:
+            items_desc = '商品'
+            
         items_desc = items_desc[:20]  # Keep it very short
         items_desc = re.sub(r'[^\w\s\u4e00-\u9fff,.]', '', items_desc)
             
