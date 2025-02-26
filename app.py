@@ -861,12 +861,20 @@ def on_data_change():
     except Exception as e:
         st.error(f"Error saving changes: {str(e)}")
 
+@st.cache_data(ttl=300)
+def get_orders_cached(access_token, client_id, client_secret, shop_id):
+    """Cached version of get_orders function"""
+    return get_orders(access_token, client_id, client_secret, shop_id)
 
+@st.cache_data(ttl=300)
+def get_order_details_bulk_cached(access_token, client_id, client_secret, shop_id, order_sn_list):
+    """Cached version of get_order_details_bulk function"""
+    return get_order_details_bulk(access_token, client_id, client_secret, shop_id, order_sn_list)
 
 def fetch_and_process_orders(token, db):
     """Fetch orders and process them into a DataFrame with all product images"""
     with st.spinner("Fetching orders..."):
-        orders_response = get_orders(
+        orders_response = get_orders_cached(
             access_token=token["access_token"],
             client_id=CLIENT_ID,
             client_secret=CLIENT_SECRET,
@@ -883,7 +891,7 @@ def fetch_and_process_orders(token, db):
             return pd.DataFrame()
 
         order_sn_list = [o["order_sn"] for o in st.session_state.orders]
-        details_response = get_order_details_bulk(
+        details_response = get_order_details_bulk_cached(
             access_token=token["access_token"],
             client_id=CLIENT_ID,
             client_secret=CLIENT_SECRET,
