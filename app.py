@@ -3160,7 +3160,7 @@ def main():
     st.set_page_config(page_title="Order Management", layout="wide")
     
     if not check_password():
-        st.stop()  # Do not continue if password check fails3
+        st.stop()  # Do not continue if password check fails333
 
     db = OrderDatabase()
     db.init_tables()
