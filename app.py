@@ -2679,12 +2679,13 @@ def orders_table(filtered_df):
     # Sort orders from oldest to newest
     filtered_df = filtered_df.sort_values('Created', ascending=True)
     
-    # Calculate total sections with 20 orders per section
-    ORDERS_PER_SECTION = 20
-    total_orders = len(filtered_df['Order Number'].unique())
-    total_sections = (total_orders + ORDERS_PER_SECTION - 1) // ORDERS_PER_SECTION  # Ceiling division
+    # Get all unique order numbers
+    all_order_numbers = filtered_df['Order Number'].unique()
+    ORDERS_PER_SECTION = 10  # Reduce from 20 to 10 for smoother scrolling
+    total_orders = len(all_order_numbers)
+    total_sections = (total_orders + ORDERS_PER_SECTION - 1) // ORDERS_PER_SECTION
     
-    # Create tabs for each section
+    # Add visibility controls
     section_tabs = st.tabs([f"Section {i+1}" for i in range(total_sections)])
     
     for section_idx in range(total_sections):
@@ -2694,34 +2695,33 @@ def orders_table(filtered_df):
             end_idx = min(start_idx + ORDERS_PER_SECTION, total_orders)
             
             # Get unique order numbers for this section
-            section_order_numbers = filtered_df['Order Number'].unique()[start_idx:end_idx]
+            section_order_numbers = all_order_numbers[start_idx:end_idx]
             
             # Filter DataFrame to include only orders in this section
             section_df = filtered_df[filtered_df['Order Number'].isin(section_order_numbers)]
             
             # Display summary
             st.write(f"Showing orders {start_idx + 1} - {end_idx} of {total_orders}")
-            st.write(f"Total rows in this section: {len(section_df)}")
-            st.write(f"Unique order numbers in this section: {len(section_order_numbers)}")
             
-            # Process each unique order
+            # Process each unique order - with smaller batch sizes
             for idx, order_num in enumerate(section_order_numbers):
-                # Get all rows for this order number
                 order_data = section_df[section_df['Order Number'] == order_num]
+                unique_key = f"section_{section_idx}_order_{order_num}"
                 
-                # Create a truly unique key
-                unique_order_editor_key = f"section_{section_idx}_orderidx_{idx}_order_{order_num}"
+                # Default to collapsed state for most orders to reduce DOM size
+                expanded = idx == 0  # Only expand the first order by default
                 
-                try:
-                    order_editor(
-                        order_data, 
-                        order_num, 
-                        section_df, 
-                        db, 
-                        unique_key=unique_order_editor_key
-                    )
-                except Exception as e:
-                    st.error(f"Error rendering order {order_num}: {str(e)}")
+                with st.expander(f"Order: {order_num}", expanded=expanded):
+                    try:
+                        order_editor_content(
+                            order_data, 
+                            order_num, 
+                            section_df, 
+                            db, 
+                            unique_key=unique_key
+                        )
+                    except Exception as e:
+                        st.error(f"Error rendering order {order_num}: {str(e)}")
     
     return filtered_df
 
