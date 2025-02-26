@@ -404,10 +404,14 @@ def shopify_ecpay_ui(order, db):
                 key=f"amount_{order['order_number']}"
             )
             
+            # Determine if collection is needed based on payment status
+            payment_status = order.get('financial_status', '').lower()
+            needs_collection = payment_status in ['pending', 'authorized', 'partially_paid', 'unpaid']
+            
             is_collection = st.checkbox(
                 "代收貨款",
-                value=False,
-                help="勾選後，收件人須支付商品金額",
+                value=needs_collection,
+                help="勾選後，收件人須於取貨時支付商品金額",
                 key=f"collection_{order['order_number']}"
             )
         
@@ -517,9 +521,18 @@ def shopee_ecpay_ui(order, db):
                 key=f"amount_{order_sn}"
             )
             
+            # Determine if collection is needed based on payment status
+            # For Shopee, check order status for payment-related states
+            order_status = order.get("order_status", "").lower()
+            payment_status = order.get("payment_method", "").lower()
+            needs_collection = (order_status == "pending" or 
+                               "cod" in payment_status or 
+                               payment_status == "pending")
+            
             is_collection = st.checkbox(
                 "代收貨款",
-                value=False,
+                value=needs_collection,
+                help="勾選後，收件人須於取貨時支付商品金額",
                 key=f"collection_{order_sn}"
             )
         
