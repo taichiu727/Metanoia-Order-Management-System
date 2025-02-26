@@ -2662,12 +2662,6 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
                 if success:
                     st.session_state[editor_key]["edited_rows"] = {}
 
-
-@st.cache_data(ttl=600)
-def get_product_tags_cached():
-    db = OrderDatabase()
-    return db.get_product_tags()
-
 @st.fragment
 def orders_table(filtered_df):
     if filtered_df.empty:
@@ -2676,12 +2670,8 @@ def orders_table(filtered_df):
     db = OrderDatabase()
     
     # Cache product tags
-    @st.cache_data(ttl=600)
-    def get_product_tags_cached(db):
-        return db.get_product_tags()
-        
     if 'product_tags' not in st.session_state:
-        st.session_state.product_tags = get_product_tags_cached()
+        st.session_state.product_tags = db.get_product_tags()
     
     if 'Tag' not in filtered_df.columns:
         filtered_df['Tag'] = filtered_df['Item Number'].map(lambda x: st.session_state.product_tags.get(x, ''))
@@ -2692,9 +2682,9 @@ def orders_table(filtered_df):
     # Calculate total sections with 20 orders per section
     ORDERS_PER_SECTION = 20
     total_orders = len(filtered_df['Order Number'].unique())
-    total_sections = (total_orders + ORDERS_PER_SECTION - 1) // ORDERS_PER_SECTION
+    total_sections = (total_orders + ORDERS_PER_SECTION - 1) // ORDERS_PER_SECTION  # Ceiling division
     
-    # Create tabs for each section - this is efficient since Streamlit only renders the active tab
+    # Create tabs for each section
     section_tabs = st.tabs([f"Section {i+1}" for i in range(total_sections)])
     
     for section_idx in range(total_sections):
@@ -2711,10 +2701,15 @@ def orders_table(filtered_df):
             
             # Display summary
             st.write(f"Showing orders {start_idx + 1} - {end_idx} of {total_orders}")
+            st.write(f"Total rows in this section: {len(section_df)}")
+            st.write(f"Unique order numbers in this section: {len(section_order_numbers)}")
             
             # Process each unique order
             for idx, order_num in enumerate(section_order_numbers):
+                # Get all rows for this order number
                 order_data = section_df[section_df['Order Number'] == order_num]
+                
+                # Create a truly unique key
                 unique_order_editor_key = f"section_{section_idx}_orderidx_{idx}_order_{order_num}"
                 
                 try:
