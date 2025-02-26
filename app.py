@@ -32,6 +32,7 @@ import psycopg2.pool
 
 # Database Configuration
 DATABASE_URL = "postgresql://neondb_owner:npg_r9iSFwQd4zAT@ep-white-sky-a1mrgmyd-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require"
+db_pool = None
 
 def get_db_pool():
     global db_pool
