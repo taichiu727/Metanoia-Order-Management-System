@@ -2662,6 +2662,12 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
                 if success:
                     st.session_state[editor_key]["edited_rows"] = {}
 
+
+@st.cache_data(ttl=600)
+def get_product_tags_cached():
+    db = OrderDatabase()
+    return db.get_product_tags()
+
 @st.fragment
 def orders_table(filtered_df):
     if filtered_df.empty:
@@ -2675,7 +2681,7 @@ def orders_table(filtered_df):
         return db.get_product_tags()
         
     if 'product_tags' not in st.session_state:
-        st.session_state.product_tags = get_product_tags_cached(db)
+        st.session_state.product_tags = get_product_tags_cached()
     
     if 'Tag' not in filtered_df.columns:
         filtered_df['Tag'] = filtered_df['Item Number'].map(lambda x: st.session_state.product_tags.get(x, ''))
