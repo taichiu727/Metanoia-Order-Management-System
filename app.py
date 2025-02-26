@@ -2056,8 +2056,9 @@ def get_column_config():
         "Note": st.column_config.TextColumn("Note", width="medium", default="")
     }
 
+@st.cache_data
 def prepare_gallery_data(order_data):
-    """Prepare product data for the gallery component"""
+    """Prepare product data for the gallery component with caching"""
     gallery_data = []
     
     for idx, row in order_data.iterrows():
@@ -2072,7 +2073,7 @@ def prepare_gallery_data(order_data):
                     "images": all_images
                 })
         except Exception as e:
-            st.error(f"Error parsing images: {str(e)}")
+            pass  # Silently ignore parsing errors
     
     return gallery_data
 
@@ -2203,17 +2204,16 @@ def create_html_gallery(gallery_data):
     return html
 
 def display_image_gallery(order_data, unique_key):
-    """Display image gallery for order data"""
+    """Display optimized image gallery for order data"""
     if 'All Images' not in order_data.columns:
         return
         
-    #st.subheader("Product Images")
     gallery_data = prepare_gallery_data(order_data)
     
     if gallery_data:
-        # Create HTML gallery and render it
+        # Create HTML gallery with lazy loading and render it
         gallery_html = create_html_gallery(gallery_data)
-        st.components.v1.html(gallery_html, height=max(300, len(gallery_data) * 350), scrolling=True)
+        st.components.v1.html(gallery_html, height=200, scrolling=True)
     else:
         st.info("No product images available for this order")
 
