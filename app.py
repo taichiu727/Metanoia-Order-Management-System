@@ -27,12 +27,18 @@ from ecpay_ui import (
     shopee_ecpay_ui, 
     init_ecpay_session
 )
-
+import psycopg2.pool
 
 
 # Database Configuration
 DATABASE_URL = "postgresql://neondb_owner:npg_r9iSFwQd4zAT@ep-white-sky-a1mrgmyd-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require"
+db_pool = None
 
+def get_db_pool():
+    global db_pool
+    if db_pool is None:
+        db_pool = psycopg2.pool.ThreadedConnectionPool(1, 10, DATABASE_URL)
+    return db_pool
 
 def check_password():
     """Returns `True` if the user had the correct password."""
@@ -85,7 +91,8 @@ class OrderDatabase:
     
     def connect(self):
         try:
-            self.conn = psycopg2.connect(DATABASE_URL)
+            pool = get_db_pool()
+            self.conn = pool.getconn()
             self.cursor = self.conn.cursor(cursor_factory=RealDictCursor)
         except Exception as e:
             st.error(f"Database connection failed: {str(e)}")
@@ -94,8 +101,9 @@ class OrderDatabase:
     def close(self):
         if self.cursor:
             self.cursor.close()
-        if self.conn:
-            self.conn.close()
+        if self.conn and db_pool:
+            db_pool.putconn(self.conn)
+            self.conn = None
 
     def init_tables(self):
         try:
@@ -853,12 +861,20 @@ def on_data_change():
     except Exception as e:
         st.error(f"Error saving changes: {str(e)}")
 
+@st.cache_data(ttl=300)
+def get_orders_cached(access_token, client_id, client_secret, shop_id):
+    """Cached version of get_orders function"""
+    return get_orders(access_token, client_id, client_secret, shop_id)
 
+@st.cache_data(ttl=300)
+def get_order_details_bulk_cached(access_token, client_id, client_secret, shop_id, order_sn_list):
+    """Cached version of get_order_details_bulk function"""
+    return get_order_details_bulk(access_token, client_id, client_secret, shop_id, order_sn_list)
 
 def fetch_and_process_orders(token, db):
-    """Fetch orders and process them into a DataFrame"""
+    """Fetch orders and process them into a DataFrame with all product images"""
     with st.spinner("Fetching orders..."):
-        orders_response = get_orders(
+        orders_response = get_orders_cached(
             access_token=token["access_token"],
             client_id=CLIENT_ID,
             client_secret=CLIENT_SECRET,
@@ -875,7 +891,7 @@ def fetch_and_process_orders(token, db):
             return pd.DataFrame()
 
         order_sn_list = [o["order_sn"] for o in st.session_state.orders]
-        details_response = get_order_details_bulk(
+        details_response = get_order_details_bulk_cached(
             access_token=token["access_token"],
             client_id=CLIENT_ID,
             client_secret=CLIENT_SECRET,
@@ -890,9 +906,42 @@ def fetch_and_process_orders(token, db):
         order_details_list.sort(key=lambda x: x['create_time'], reverse=True)
         st.session_state.order_details = order_details_list
 
-         # Load reference images
+        # Load reference images
         reference_images = db.get_product_images()
-
+        
+        # Collect item IDs to fetch complete image lists
+        item_ids = []
+        item_id_to_sku_mapping = {}
+        
+        for order_detail in st.session_state.order_details:
+            if "item_list" in order_detail:
+                for item in order_detail["item_list"]:
+                    item_id = item.get("item_id")
+                    if item_id:
+                        item_ids.append(item_id)
+                        item_id_to_sku_mapping[item_id] = item.get("item_sku", "")
+        
+        # Fetch complete item details in batches
+        item_details = {}
+        batch_size = 50  # API limit is 50 items per request
+        
+        for i in range(0, len(item_ids), batch_size):
+            batch_ids = item_ids[i:i+batch_size]
+            batch_response = get_item_base_info(
+                access_token=token["access_token"],
+                client_id=CLIENT_ID,
+                client_secret=CLIENT_SECRET,
+                shop_id=SHOP_ID,
+                item_ids=batch_ids
+            )
+            
+            if batch_response and "response" in batch_response and "item_list" in batch_response["response"]:
+                for item in batch_response["response"]["item_list"]:
+                    item_details[item["item_id"]] = item
+            
+            # Add a small delay to avoid rate limits
+            time.sleep(0.2)
+        
         # Process orders into DataFrame with item_spec in the tracking key
         tracking_data = {
             (item['order_sn'], item['product_name'], item['item_spec']): item 
@@ -907,17 +956,32 @@ def fetch_and_process_orders(token, db):
                         (order_detail["order_sn"], item["item_name"], item["model_name"]), 
                         {'received': False, 'missing_count': 0, 'note': ''}
                     )
+                    
                     item_sku = item.get("item_sku", "")
                     reference_image = reference_images.get(item_sku, "")
                     if reference_image:
                         reference_image = f"data:image/jpeg;base64,{reference_image}"
+                    
+                    # Get all images for this item
+                    all_images = []
+                    item_id = item.get("item_id")
+                    if item_id in item_details:
+                        # Check if the item_details contains image object with image_url_list
+                        image_info = item_details[item_id].get("image", {})
+                        if image_info and "image_url_list" in image_info:
+                            all_images = image_info.get("image_url_list", [])
+                    
+                    # String representation for all images to store in DataFrame
+                    all_images_str = json.dumps(all_images) if all_images else "[]"
+                    
                     orders_data.append({
                         "Order Number": order_detail["order_sn"],
                         "Created": datetime.fromtimestamp(order_detail["create_time"]).strftime("%Y-%m-%d %H:%M"),
                         "Deadline": datetime.fromtimestamp(order_detail["ship_by_date"]).strftime("%Y-%m-%d %H:%M"),
                         "Product": item["item_name"],
                         "Quantity": item["model_quantity_purchased"],
-                        "Image": item["image_info"]["image_url"],
+                        "Image": item["image_info"]["image_url"],  # Primary image
+                        "All Images": all_images_str,  # Store all images as JSON string
                         "Reference Image": reference_image,
                         "Item Spec": item["model_name"],
                         "Item Number": item["item_sku"],
@@ -925,8 +989,19 @@ def fetch_and_process_orders(token, db):
                         "Missing": tracking['missing_count'],
                         "Note": tracking['note']
                     })
-        
-        return pd.DataFrame(orders_data)
+        orders_df = pd.DataFrame(orders_data)
+        # Debug: Check if All Images column exists and contains valid data
+        if "All Images" in orders_df.columns:
+            st.write(f"Debug: All Images column exists with {len(orders_df)} rows")
+            # Check a sample to ensure data is properly formatted
+            if not orders_df.empty:
+                sample = orders_df.iloc[0]["All Images"]
+                st.write(f"Debug: Sample All Images data: {sample[:100]}...")
+        else:
+            st.write("Debug: All Images column is missing!")
+        return orders_df
+
+        #return pd.DataFrame(orders_data)
 
 def handle_data_editor_changes(edited_df, db):
     """Handle changes made in the data editor"""
@@ -1968,7 +2043,7 @@ def get_column_config():
         "Item Spec": st.column_config.TextColumn("Item Spec", width="small"),
         "Item Number": st.column_config.TextColumn("Item Number", width="small"),
         "Quantity": st.column_config.NumberColumn("Quantity", width="small"),
-        "Image": st.column_config.ImageColumn("Image", width="small"),
+        "Image": st.column_config.ImageColumn("Primary Image", width="small"),
         "Reference Image": st.column_config.ImageColumn(
             "Reference Image",
             width="small",
@@ -1980,6 +2055,168 @@ def get_column_config():
         "Note": st.column_config.TextColumn("Note", width="medium", default="")
     }
 
+@st.cache_data
+def prepare_gallery_data(order_data):
+    """Prepare product data for the gallery component with caching"""
+    gallery_data = []
+    
+    for idx, row in order_data.iterrows():
+        try:
+            # Parse the JSON string to get all image URLs
+            all_images = json.loads(row['All Images']) if isinstance(row['All Images'], str) else []
+            
+            if all_images:
+                gallery_data.append({
+                    "productName": row["Product"],
+                    "itemSpec": row["Item Spec"],
+                    "images": all_images
+                })
+        except Exception as e:
+            pass  # Silently ignore parsing errors
+    
+    return gallery_data
+
+@st.cache_data
+def create_html_gallery(gallery_data):
+    """Create an optimized HTML-based image gallery with lazy loading and caching"""
+    html = """
+    <style>
+        .gallery-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        .gallery-item {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            width: 100%;
+            margin-bottom: 0.5rem;
+        }
+        .gallery-header {
+            padding: 0.25rem;
+            background-color: #f0f7ff;
+            border-bottom: 1px solid #ddd;
+        }
+        .gallery-title {
+            margin: 0;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+        .gallery-subtitle {
+            margin: 0;
+            font-size: 0.7rem;
+            color: #666;
+        }
+        .main-image-container {
+            display: flex;
+            justify-content: center;
+            padding: 0.25rem;
+            background-color: white;
+            min-height: 120px;
+            align-items: center;
+        }
+        .main-image {
+            max-height: 120px;
+            max-width: 100%;
+            object-fit: contain;
+        }
+        .thumbnails {
+            display: flex;
+            overflow-x: auto;
+            padding: 0.25rem;
+            background-color: #f9f9f9;
+            gap: 0.25rem;
+        }
+        .thumbnail {
+            width: 30px;
+            height: 30px;
+            object-fit: cover;
+            border: 1px solid #ddd;
+            cursor: pointer;
+        }
+        .thumbnail.active {
+            border: 2px solid #1e88e5;
+        }
+    </style>
+    
+    <div class="gallery-container">
+    """
+    
+    for i, product in enumerate(gallery_data):
+        product_name = product['productName']
+        item_spec = product['itemSpec']
+        images = product['images']
+        
+        if not images:
+            continue
+            
+        image_id_prefix = f"gallery_product_{i}"
+        
+        html += f"""
+        <div class="gallery-item">
+            <div class="gallery-header">
+                <h4 class="gallery-title">{product_name}</h4>
+                <p class="gallery-subtitle">{item_spec}</p>
+            </div>
+            <div class="main-image-container">
+                <img id="{image_id_prefix}_main" src="{images[0]}" class="main-image" alt="{product_name}" loading="lazy">
+            </div>
+            <div class="thumbnails">
+        """
+        
+        for j, img_url in enumerate(images):
+            active_class = "active" if j == 0 else ""
+            html += f"""
+                <img 
+                    src="{img_url}" 
+                    class="thumbnail {active_class}" 
+                    onclick="updateMainImage('{image_id_prefix}_main', '{img_url}', this)"
+                    alt="Thumbnail {j+1}"
+                    loading="lazy">
+            """
+            
+        html += """
+            </div>
+        </div>
+        """
+    
+    html += """
+    </div>
+    
+    <script>
+        function updateMainImage(mainImageId, newSrc, thumbElement) {
+            // Update main image
+            document.getElementById(mainImageId).src = newSrc;
+            
+            // Update active state of thumbnails
+            const thumbnails = thumbElement.parentNode.querySelectorAll('.thumbnail');
+            thumbnails.forEach(thumb => {
+                thumb.classList.remove('active');
+            });
+            thumbElement.classList.add('active');
+        }
+    </script>
+    """
+    
+    return html
+
+def display_image_gallery(order_data, unique_key):
+    """Display optimized image gallery for order data"""
+    if 'All Images' not in order_data.columns:
+        return
+        
+    gallery_data = prepare_gallery_data(order_data)
+    
+    if gallery_data:
+        # Create HTML gallery with lazy loading and render it
+        gallery_html = create_html_gallery(gallery_data)
+        st.components.v1.html(gallery_html, height=200, scrolling=True)
+    else:
+        st.info("No product images available for this order")
+
 @st.fragment
 def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
     all_received = all(order_data['Received'])
@@ -1987,6 +2224,8 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
 
     if 'reference_images' not in st.session_state:
         st.session_state.reference_images = db.get_product_images()
+    
+   
     
     with st.expander(f"Order: {order_num} {status_emoji}", expanded=True):
         # Add shipping controls
@@ -2177,12 +2416,10 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
                         client_secret=CLIENT_SECRET,
                         shop_id=SHOP_ID,
                         order_sn=order_num,
-                        request_body=doc_request  # Pass the request body with tracking number
+                        request_body=doc_request
                     )
                     
                     if doc_response and ("error" not in doc_response or doc_response.get("error") == ""):
-                        # Download shipping document
-                        st.info("Downloading shipping document...")
                         download_response = download_shipping_document(
                             access_token=token["access_token"],
                             client_id=CLIENT_ID,
@@ -2208,12 +2445,8 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
                                 st.success("Shipping document should open automatically")
                             elif response_type == "pdf":
                                 pdf_data = download_response["response"]["content"]
-                                
-                                # Create HTML to open PDF in new tab
                                 html_content = f"""
-                                <html>
-                                <body>
-                                <script>
+                                <html><body><script>
                                     var pdfData = "{pdf_data}";
                                     var byteCharacters = atob(pdfData);
                                     var byteNumbers = new Array(byteCharacters.length);
@@ -2224,9 +2457,7 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
                                     var file = new Blob([byteArray], {{ type: 'application/pdf' }});
                                     var fileURL = URL.createObjectURL(file);
                                     window.open(fileURL, '_blank');
-                                </script>
-                                </body>
-                                </html>
+                                </script></body></html>
                                 """
                                 st.components.v1.html(html_content, height=0)
                                 st.success("PDF should open in new tab")
@@ -2247,10 +2478,9 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
                 else:
                     st.error("Invalid token. Please re-authenticate.")
 
-        editor_key = f"editor_{unique_key}"
-
-        # Add Reference Images to display data
+        # Reference image and data editor section
         display_data = order_data.copy()
+        
         # Format reference images with data URL
         def format_reference_image(sku):
             if sku in st.session_state.reference_images and st.session_state.reference_images[sku]:
@@ -2261,10 +2491,36 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
         # Add Reference Image column
         display_data["Reference Image"] = display_data["Item Number"].apply(format_reference_image)
         
-        display_data = display_data[["Order Number", "Created", "Deadline", "Product", 
-                                   "Item Spec", "Item Number", "Quantity", "Image", 
-                                   "Reference Image", "Received", "Missing", "Note", "Tag"]]
+       
         
+        # Select columns for display
+        display_columns = ["Order Number", "Created", "Deadline", "Product", 
+                         "Item Spec", "Item Number", "Quantity", "Image", 
+                         "Reference Image"]
+        
+        
+            
+        display_columns.extend(["Received", "Missing", "Note", "Tag"])
+        
+        # Keep only the selected columns
+        display_data = display_data[display_columns]
+        
+        # Configure column display
+        column_config = get_column_config()
+        
+        # Add "View Images" button column if available
+        if 'All Images' in order_data.columns:
+            #st.subheader("Product Images")
+            gallery_data = prepare_gallery_data(order_data)
+            
+            if gallery_data:
+                # Create HTML gallery and render it with a smaller height
+                gallery_html = create_html_gallery(gallery_data)
+                st.components.v1.html(gallery_html, height=200, scrolling=True)
+            else:
+                st.info("No product images available for this order")
+        
+        # Apply quantity highlighting
         def highlight_quantity(df):
             """
             Highlight cells with quantity > 1 in yellow
@@ -2273,19 +2529,22 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
                 return 'background-color: yellow' if val > 1 else ''
             
             return df.style.map(color_quantity, subset=['Quantity'])
-
-        # In your order_editor function, modify the data editor creation
+        
+        # Style the data
         display_data_styled = highlight_quantity(display_data)
-       
+        
+        # Display the data editor
+        editor_key = f"editor_{unique_key}"
         edited_df = st.data_editor(
             display_data_styled,
-            column_config=get_column_config(),
+            column_config=column_config,
             use_container_width=True,
             key=editor_key,
             num_rows="fixed",
             disabled=["Order Number", "Created", "Deadline", "Product", 
-                     "Item Spec", "Item Number", "Quantity", "Image"]
+                     "Item Spec", "Item Number", "Quantity", "Image", "Reference Image"]
         )
+
         
         # Add file uploaders for each unique SKU
         unique_skus = display_data["Item Number"].unique()
@@ -2335,6 +2594,7 @@ def order_editor(order_data, order_num, filtered_df, db, unique_key=None):
                         # Show success message
                         st.success(f"Image updated for {sku}")
         
+        # Handle editor changes for Received, Missing, Note, and Tag fields
         if editor_key in st.session_state and "edited_rows" in st.session_state[editor_key]:
             edited_rows = st.session_state[editor_key]["edited_rows"]
             if edited_rows:
@@ -2418,8 +2678,8 @@ def orders_table(filtered_df):
     # Sort orders from oldest to newest
     filtered_df = filtered_df.sort_values('Created', ascending=True)
     
-    # Calculate total sections with 30 orders per section
-    ORDERS_PER_SECTION = 20  # Changed from 50 to 30
+    # Calculate total sections with 20 orders per section
+    ORDERS_PER_SECTION = 20
     total_orders = len(filtered_df['Order Number'].unique())
     total_sections = (total_orders + ORDERS_PER_SECTION - 1) // ORDERS_PER_SECTION  # Ceiling division
     
@@ -2916,7 +3176,7 @@ def main():
     st.set_page_config(page_title="Order Management", layout="wide")
     
     if not check_password():
-        st.stop()  # Do not continue if password check fails
+        st.stop()  # Do not continue if password check fails333
 
     db = OrderDatabase()
     db.init_tables()
@@ -2941,8 +3201,8 @@ def main():
         return
 
     # Use sidebar fragment within sidebar context
-    with st.sidebar:
-        sidebar_controls()
+    #with st.sidebar:
+        #sidebar_controls()
     
     # Main navigation tabs
     main_tabs = st.tabs(["Order Management", "Products", "Settings"])

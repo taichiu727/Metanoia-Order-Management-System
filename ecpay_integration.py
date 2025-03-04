@@ -149,7 +149,21 @@ class ECPayLogistics:
                     "message": f"HTTP error: {status_code}", 
                     "details": content
                 }
-            
+            if params.get("LogisticsSubType") == "FAMIC2C":
+                    st.write("Debug - FamilyMart Order Creation:")
+                    st.write("URL:", url)
+                    st.write("Headers:", headers)
+                    st.write("Request Parameters:", params)
+                    st.write("Response Status:", status_code)
+                    st.write("Response Content-Type:", content_type)
+                    st.write("Response Content:", content)
+
+            if status_code != 200:
+                return {
+                    "error": True, 
+                    "message": f"HTTP error: {status_code}", 
+                    "details": content
+                }
             # Parse response based on content type
             try:
                 # HTML response with key-value pairs
@@ -291,17 +305,7 @@ class ECPayLogistics:
 
     @staticmethod
     def print_shipping_document(logistics_id, payment_no, validation_no=None, document_type="UNIMARTC2C"):
-        """Generate shipping document for printing in a new tab
-        
-        Args:
-            logistics_id (str): ECPay logistics transaction ID
-            payment_no (str): Shipping number
-            validation_no (str, optional): Validation code (required for 7-ELEVEN)
-            document_type (str): "UNIMARTC2C" for 7-ELEVEN or "FAMIC2C" for FamilyMart
-                
-        Returns:
-            str: HTML content for printing shipping label
-        """
+        """Generate shipping document for printing in a new tab"""
         # Prepare parameters
         params = {
             "MerchantID": ECPAY_MERCHANT_ID,
@@ -324,31 +328,25 @@ class ECPayLogistics:
         else:
             return {"error": True, "message": "Unsupported document type"}
         
-        # Create HTML with auto-submitting form in a new tab
-        form_html = f"""
+        # Create HTML with auto-submitting form
+        form_html = f'''
         <html>
-        <head>
-            <title>ECPay Shipping Label</title>
-        </head>
-        <body onload="document.getElementById('ecpayForm').submit();">
+        <body>
             <form id="ecpayForm" method="post" action="{url}" target="_blank">
-        """
+    '''
         
+        # Add hidden inputs for all parameters
         for key, value in params.items():
-            form_html += f'<input type="hidden" name="{key}" value="{value}">\n'
+            form_html += f'    <input type="hidden" name="{key}" value="{value}">\n'
         
-        form_html += """
+        form_html += '''
             </form>
             <script>
-                // This ensures the form submits immediately and opens in a new tab
-                setTimeout(function() {
-                    document.getElementById('ecpayForm').submit();
-                }, 100);
+                document.getElementById('ecpayForm').submit();
             </script>
-            <p>正在開啟列印視窗，請等待...</p>
         </body>
         </html>
-        """
+        '''
         
         return form_html
     
