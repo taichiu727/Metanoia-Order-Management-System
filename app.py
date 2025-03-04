@@ -1959,7 +1959,6 @@ def sidebar_controls():
             st.session_state.clear()
             st.rerun()
 
-@st.cache_data
 def get_column_config():
     return {
         "Order Number": st.column_config.TextColumn("Order Number", width="small"),
@@ -2602,7 +2601,7 @@ def handle_data_editor_changes(edited_df, db):
 
 
 
-@st.cache_data(ttl=300)
+
 def fetch_all_products(access_token, client_id, client_secret, shop_id):
     """Fetch all products with complete pagination handling"""
     all_items = []
