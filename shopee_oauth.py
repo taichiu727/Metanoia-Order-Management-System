@@ -32,7 +32,7 @@ def get_auth_url():
             f"redirect={REDIRECT_URI}")
 
 def get_products(access_token):
-    """Fetch all products from Shopee API"""
+    """Fetch all products from Shopee API33"""
     now = int(time.time())
     thirty_days_ago = now - (30 * 24 * 60 * 60)
     
