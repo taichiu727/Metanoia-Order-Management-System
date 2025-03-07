@@ -103,10 +103,6 @@ def fetch_token(code):
         "shop_id": SHOP_ID,
         "partner_id": int(CLIENT_ID)
     }
-    data["fetch_time"] = int(time.time())
-    if "refresh_token_expire_in" not in data:
-        # Default to ~1 year if not provided by the API
-        data["refresh_token_expire_in"] = 365 * 24 * 60 * 60
     
     try:
         response = requests.post(url, params=params, json=payload)
@@ -118,6 +114,14 @@ def fetch_token(code):
                 raise ValueError(f"API Error: {data.get('message', 'No error message provided')}")
             if "access_token" not in data:
                 raise ValueError("Access token missing in response")
+                
+            # Add the fetch_time AFTER we have the data object
+            data["fetch_time"] = int(time.time())
+            
+            # Default to ~1 year if not provided by the API
+            if "refresh_token_expire_in" not in data:
+                data["refresh_token_expire_in"] = 365 * 24 * 60 * 60
+                
             return data
         else:
             raise Exception(f"API Error: Status {response.status_code} - {response.text}")
