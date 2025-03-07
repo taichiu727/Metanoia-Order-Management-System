@@ -168,26 +168,28 @@ def refresh_token(refresh_token):
 
 def is_token_valid(token_data):
     """Check if the token is still valid and not near expiration"""
-    if not token_data:
+    if not token_data or "access_token" not in token_data:
         return False
         
     current_time = int(time.time())
     fetch_time = token_data.get("fetch_time", 0)
     expire_in = token_data.get("expire_in", 0)
-    refresh_token_expire_in = token_data.get("refresh_token_expire_in", 0)
     
-    # Check if refresh token is expired
-    if refresh_token_expire_in > 0 and (fetch_time + refresh_token_expire_in - current_time) <= 0:
+    # Add more logging to understand token status
+    time_left = fetch_time + expire_in - current_time
+    print(f"Token expires in: {time_left} seconds")
+    
+    # If access token is expired, don't consider it valid regardless of refresh token
+    if time_left <= 0:
         return False
-    
-    # If access token is expired or will expire soon, but refresh token is valid,
-    # we can still consider the token data valid as it can be refreshed
-    if (fetch_time + expire_in - current_time) <= 300:
+        
+    # For soon-to-expire tokens, still validate but prepare for refresh
+    if time_left <= 300:
         return "refresh_token" in token_data
         
     return True
 
-def get_valid_token(db):
+def get_valid_token(db, force_refresh=False):
     """Get a valid token from database, refresh if needed"""
     token_data = db.load_token()
     
@@ -197,25 +199,22 @@ def get_valid_token(db):
     current_time = int(time.time())
     fetch_time = token_data.get("fetch_time", 0)
     expire_in = token_data.get("expire_in", 0)
+    time_left = fetch_time + expire_in - current_time
     
-    # If access token is expired or will expire soon, but the token data is still valid
-    # (meaning we have a valid refresh token), refresh it
-    if (fetch_time + expire_in - current_time) <= 300 and "refresh_token" in token_data:
-        try:
-            new_token_data = refresh_token(token_data["refresh_token"])
-            if new_token_data:
-                # Preserve the refresh token expiration if it's not in the new token data
-                if ("refresh_token_expire_in" not in new_token_data and 
-                    "refresh_token_expire_in" in token_data):
-                    new_token_data["refresh_token_expire_in"] = token_data["refresh_token_expire_in"]
-                db.save_token(new_token_data)
-                return new_token_data
-        except Exception as e:
-            print(f"Error refreshing token: {str(e)}")
-            # If token refresh fails and the current token is completely invalid,
-            # return None to trigger reauthorization
-            if not is_token_valid(token_data):
-                return None
-            return token_data
-            
+    # Force refresh or refresh if expiring soon
+    if force_refresh or time_left <= 300:
+        if "refresh_token" in token_data:
+            try:
+                print("Refreshing token...")
+                new_token_data = refresh_token(token_data["refresh_token"])
+                if new_token_data and "access_token" in new_token_data:
+                    db.save_token(new_token_data)
+                    return new_token_data
+            except Exception as e:
+                print(f"Error refreshing token: {str(e)}")
+                # If we forced refresh and it failed, return None
+                if force_refresh:
+                    return None
+    
+    # Return existing token if still valid            
     return token_data if is_token_valid(token_data) else None
